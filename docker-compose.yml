@@ -1,0 +1,21 @@
+services:
+  goyt:
+    build: .
+    image: goyt
+    container_name: goyt
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GOYT_BIND: 0.0.0.0
+      GOYT_PORT: 3000
+      # Set a web UI password (enables the login gate). Leave unset for none.
+      # WEBUI_PASSWORD: changeme
+    volumes:
+      # Saved downloads on the host.
+      - ./downloads:/app/downloads
+      # Persist the auto-downloaded yt-dlp binary across container recreates.
+      - ytdlp:/app/assets/yt-dlp
+
+volumes:
+  ytdlp:

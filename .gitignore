@@ -1,0 +1,168 @@
+# Go binaries and executables
+/goyt
+goyt.exe
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Cookies files contain live auth/session data; never commit them
+cookies.txt
+*cookies*.txt
+
+# Test binaries and coverage
+*.test
+*.out
+coverage.html
+*.bench
+*.prof
+*.pprof
+
+# Go workspace file
+go.work
+
+# Configuration and runtime files
+config.json
+config-*.json
+state.json
+downloads.json
+queue.json
+*.log
+*.pid
+*.lock
+
+# Download directories and output
+downloads/
+output/
+temp/
+
+# Node.js dependencies (for CSS processing)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+yarn.lock
+# package-lock.json IS tracked: the Dockerfile build runs `npm ci`, which
+# requires a committed lockfile, and it pins the CSS toolchain for CI.
+
+# CSS build outputs
+web/public/css/
+dist/
+build/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.vim/
+
+# Environment files
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Linux specific
+.fuse_hidden*
+.nfs*
+
+# Asset directories (downloaded binaries)
+assets/yt-dlp/yt-dlp*
+assets/ffmpeg/ffmpeg*
+assets/ffmpeg/ffprobe*
+assets/temp/
+
+# Duplicate yt-dlp binaries in wrong locations
+internal/api/yt-dlp*
+internal/config/yt-dlp*
+
+# Temporary and partial files
+*.tmp
+*.temp
+*.part
+*.bak
+*.backup
+*.old
+
+# Archive files (often large)
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Video and audio files (prevent accidental uploads)
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.wmv
+*.flv
+*.webm
+*.m4v
+*.3gp
+*.mp3
+*.flac
+*.aac
+*.ogg
+*.wav
+*.m4a
+*.wma
+*.opus
+
+# Personal notes and documentation
+TODO.md
+NOTES.md
+todo.txt
+notes.txt
+
+# AI assistant related files
+.claude/
+claude-*
+*-claude.*
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+.cursor/
+.cursorrules
+.aider*
+.windsurfrules
+.github/copilot-instructions.md
+memories.json
+reflections.json
+
+# Test and example files
+test_*
+example_*
+sample_*
+test-*.js
+*-test
+progress-fixes-summary.md
+*-ANALYSIS.md
+
+# Documentation build artifacts
+docs/_build/
+docs/site/
+
+# AI tooling planning/spec artifacts (not required in repo)
+docs/superpowers/
+
+# Local design reference screenshots (not required in repo)
+newdesignsamples/
+
+# Local test artifacts
+.playwright-mcp/
+/*.png

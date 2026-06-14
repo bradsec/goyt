@@ -1,0 +1,25 @@
+{
+  "name": "goyt - web interface for yt-dlp",
+  "short_name": "goyt",
+  "description": "Self-hosted web interface for yt-dlp video and audio downloads",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#050505",
+  "theme_color": "#050505",
+  "icons": [
+    {
+      "src": "/assets/img/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/assets/img/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "categories": ["utilities", "multimedia"],
+  "lang": "en",
+  "dir": "ltr"
+}

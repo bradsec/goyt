@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+    <title>goyt - yt-dlp web interface</title>
+    <meta name="description" content="Self-hosted web interface for yt-dlp video and audio downloads">
+    <meta name="author" content="goyt">
+
+    <link rel="stylesheet" href="/assets/css/main.css">
+
+    <link rel="icon" href="/assets/img/favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/img/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/assets/img/favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/img/apple-touch-icon.png">
+    <link rel="manifest" href="/assets/site.webmanifest">
+
+    <meta name="theme-color" content="#27282c">
+
+    <style>
+    .media-modal { border: 1px solid var(--border, #333); border-radius: 8px; padding: 0; max-width: 90vw; width: 720px; background: var(--bg-raised, #12131a); color: inherit; box-shadow: var(--shadow-soft, 0 16px 40px rgb(0 0 0 / 28%)); }
+    .media-modal::backdrop { background: rgba(0, 0, 0, 0.72); }
+    .media-modal-content { display: flex; flex-direction: column; gap: 0.75rem; padding: 1rem; }
+    .media-modal-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+    .media-modal-title { font-family: var(--font-display, inherit); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .media-modal-video { width: 100%; max-height: 70vh; background: #000; }
+    .media-modal-audio { width: 100%; }
+    </style>
+</head>
+<body>
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+        <defs>
+            <symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18"/><path d="M17 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/></symbol>
+            <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></symbol>
+            <symbol id="i-file-down" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M12 18v-6"/><path d="m9 15 3 3 3-3"/></symbol>
+            <symbol id="i-sliders" viewBox="0 0 24 24"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></symbol>
+            <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+            <symbol id="i-x-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></symbol>
+            <symbol id="i-check-circle" viewBox="0 0 24 24"><path d="M21.801 10A10 10 0 1 1 17 3.335"/><path d="m9 11 3 3L22 4"/></symbol>
+            <symbol id="i-alert-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></symbol>
+            <symbol id="i-alert-triangle" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+            <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+            <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+            <symbol id="i-list" viewBox="0 0 24 24"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></symbol>
+            <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+            <symbol id="i-pause" viewBox="0 0 24 24"><rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/></symbol>
+            <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
+            <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol>
+            <symbol id="i-rotate-ccw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+            <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></symbol>
+            <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></symbol>
+            <symbol id="i-gauge" viewBox="0 0 24 24"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></symbol>
+            <symbol id="i-save" viewBox="0 0 24 24"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/></symbol>
+        </defs>
+    </svg>
+
+    <div class="frame">
+        <header class="topbar">
+            <pre class="banner" aria-label="goyt">  ▐▄▄▄▄▄▄▄▌ ▐▄▄▄▄▄▄▌ ▐▄▄▌  ▐▄▄▌▐▄▄▄▄▄▄▄▄▌
+ ▐██▌      ▐██▌  ▐██▌▐██▌  ▐██▌   ▐██▌
+ ▐██▌▐████▌▐██▌  ▐██▌ ▐███████▌   ▐██▌
+ ▐▀▀▌  ▐▀▀▌▐▀▀▌  ▐▀▀▌      ▐▀▀▌   ▐▀▀▌
+  ▐▄▄▄▄▄▄▄▌ ▐▄▄▄▄▄▄▌ ▐▄▄▄▄▄▄▄▌    ▐▄▄▌</pre>
+            <p class="banner-sub">a web interface for yt-dlp<span class="brand-cursor" aria-hidden="true">_</span></p>
+            <div class="header-actions">
+                <button type="button" id="settings-toggle" class="btn btn-ghost btn-icon"
+                    title="Settings" aria-label="Open settings panel">
+                    <svg class="icon" aria-hidden="true"><use href="#i-sliders"></use></svg>
+                </button>
+                <button type="button" id="logout-btn" class="btn btn-ghost"
+                    title="Sign out" aria-label="Sign out" hidden>Sign out</button>
+            </div>
+        </header>
+
+        <main class="workspace">
+            <section class="intake" aria-labelledby="command-title">
+                <div class="sect-tag">
+                    <span class="sect-no" aria-hidden="true">01</span>
+                    <span class="panel-label" id="command-title">Intake</span>
+                </div>
+                <form id="download-form">
+                    <div class="form-group">
+                        <label for="url-input" class="form-label">Media URL</label>
+                        <div class="prompt-row">
+                            <span class="prompt-mark" aria-hidden="true">&#9656;</span>
+                            <input
+                                type="url"
+                                id="url-input"
+                                name="url"
+                                class="form-input prompt-input"
+                                placeholder="paste a video or playlist URL"
+                                required
+                                autocomplete="off"
+                                spellcheck="false"
+                                aria-describedby="url-validation"
+                            >
+                        </div>
+                        <div id="url-validation" class="hidden mt-2"></div>
+                    </div>
+
+                    <div id="playlist-options" class="hidden"></div>
+
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="type-select" class="form-label">Type</label>
+                            <select name="type" id="type-select" class="form-select">
+                                <option value="video">Video</option>
+                                <option value="audio">Audio only</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="quality-select" class="form-label">Quality</label>
+                            <select name="quality" id="quality-select" class="form-select">
+                                <option value="best">Best available</option>
+                                <option value="4k">4K (2160p)</option>
+                                <option value="2k">2K (1440p)</option>
+                                <option value="1080p">1080p</option>
+                                <option value="720p">720p</option>
+                                <option value="480p">480p</option>
+                                <option value="360p">360p</option>
+                                <option value="worst">Smallest size</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="format-select" class="form-label">Format</label>
+                            <select name="format" id="format-select" class="form-select">
+                                <option value="mp4">MP4</option>
+                                <option value="mkv">MKV</option>
+                                <option value="webm">WebM</option>
+                                <option value="avi">AVI</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-footer">
+                        <button type="submit" id="submit-button" class="btn btn-primary btn-lg" disabled>
+                            <svg class="icon icon-sm" aria-hidden="true"><use href="#i-download"></use></svg>
+                            <span class="btn-text">Start download</span>
+                        </button>
+                        <p class="form-hint">Downloads are remuxed without re-encoding, so they stay fast and usually play everywhere. If one won't play on an older device, use its Convert button to transcode that file to H.264 + AAC.</p>
+                    </div>
+                </form>
+            </section>
+
+            <section class="ledger" aria-label="Download activity">
+                <div class="sect-tag board-header">
+                    <span class="sect-no" aria-hidden="true">02</span>
+                    <h2 class="board-title panel-label">Ledger</h2>
+                    <div class="btn-group">
+                        <button type="button" id="clear-queued" class="btn btn-secondary btn-sm">
+                            <svg class="icon icon-sm" aria-hidden="true"><use href="#i-x-circle"></use></svg>
+                            <span class="btn-text">Clear queued</span>
+                        </button>
+                        <button type="button" id="delete-completed" class="btn btn-secondary btn-sm">
+                            <svg class="icon icon-sm" aria-hidden="true"><use href="#i-trash"></use></svg>
+                            <span class="btn-text">Delete completed</span>
+                        </button>
+                        <button type="button" id="clear-failed" class="btn btn-secondary btn-sm">
+                            <svg class="icon icon-sm" aria-hidden="true"><use href="#i-alert-circle"></use></svg>
+                            <span class="btn-text">Clear failed</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="empty-board" class="empty-board">
+                    <span class="empty-mark" aria-hidden="true">&#8645;</span>
+                    <p>Ledger empty. Paste a URL to open the first entry.</p>
+                </div>
+
+                <div id="downloading-section" class="status-section" style="display:none">
+                    <div class="section-header" data-section="downloading" role="button" tabindex="0" aria-expanded="true">
+                        <div class="section-title">
+                            <span class="status-key status-key-active" aria-hidden="true"></span>
+                            <h3>Downloading</h3>
+                            <span id="downloading-count" class="count">0</span>
+                        </div>
+                        <svg class="icon icon-sm section-chevron" aria-hidden="true"><use href="#i-chevron-down"></use></svg>
+                    </div>
+                    <div id="downloading-content" class="section-content section-expanded"></div>
+                </div>
+
+                <div id="processing-section" class="status-section" style="display:none">
+                    <div class="section-header" data-section="processing" role="button" tabindex="0" aria-expanded="true">
+                        <div class="section-title">
+                            <span class="status-key status-key-processing" aria-hidden="true"></span>
+                            <h3>Converting</h3>
+                            <span id="processing-count" class="count">0</span>
+                        </div>
+                        <svg class="icon icon-sm section-chevron" aria-hidden="true"><use href="#i-chevron-down"></use></svg>
+                    </div>
+                    <div id="processing-content" class="section-content section-expanded"></div>
+                </div>
+
+                <div id="queued-section" class="status-section" style="display:none">
+                    <div class="section-header" data-section="queued" role="button" tabindex="0" aria-expanded="true">
+                        <div class="section-title">
+                            <span class="status-key status-key-queued" aria-hidden="true"></span>
+                            <h3>Queued</h3>
+                            <span id="queued-count" class="count">0</span>
+                        </div>
+                        <svg class="icon icon-sm section-chevron" aria-hidden="true"><use href="#i-chevron-down"></use></svg>
+                    </div>
+                    <div id="queued-content" class="section-content section-expanded"></div>
+                </div>
+
+                <div id="completed-section" class="status-section" style="display:none">
+                    <div class="section-header" data-section="completed" role="button" tabindex="0" aria-expanded="true">
+                        <div class="section-title">
+                            <span class="status-key status-key-done" aria-hidden="true"></span>
+                            <h3>Completed</h3>
+                            <span id="completed-count" class="count">0</span>
+                        </div>
+                        <svg class="icon icon-sm section-chevron" aria-hidden="true"><use href="#i-chevron-down"></use></svg>
+                    </div>
+                    <div id="completed-content" class="section-content section-expanded"></div>
+                </div>
+
+                <div id="failed-section" class="status-section" style="display:none">
+                    <div class="section-header" data-section="failed" role="button" tabindex="0" aria-expanded="true">
+                        <div class="section-title">
+                            <span class="status-key status-key-failed" aria-hidden="true"></span>
+                            <h3>Failed</h3>
+                            <span id="failed-count" class="count">0</span>
+                        </div>
+                        <svg class="icon icon-sm section-chevron" aria-hidden="true"><use href="#i-chevron-down"></use></svg>
+                    </div>
+                    <div id="failed-content" class="section-content section-expanded"></div>
+                </div>
+            </section>
+        </main>
+
+        <footer class="footer">
+            <p>goyt <span id="footer-app-version"></span> &middot; a web interface for yt-dlp &middot; developed by <a class="footer-link" href="https://github.com/bradsec/goyt" target="_blank" rel="noopener noreferrer">BRADSEC</a> &middot; yt-dlp <span id="footer-ytdlp-version"></span> &middot; ffmpeg <span id="footer-ffmpeg-version"></span></p>
+        </footer>
+    </div>
+
+    <div id="settings-overlay" class="settings-overlay"></div>
+    <aside id="settings-panel" class="settings-panel" aria-label="Settings">
+        <div class="settings-header">
+            <h2 class="settings-title">Settings</h2>
+            <button type="button" id="settings-close" class="btn btn-ghost btn-icon" aria-label="Close settings">
+                <svg class="icon icon-sm" aria-hidden="true"><use href="#i-x"></use></svg>
+            </button>
+        </div>
+        <div class="settings-body">
+            <form id="settings-form">
+                <fieldset class="settings-group">
+                    <legend class="settings-legend">Downloads</legend>
+
+                    <div class="form-group">
+                        <label for="download_path" class="form-label">Download path</label>
+                        <input type="text" name="download_path" id="download_path" class="form-input">
+                        <div class="form-help">Local directory where files are saved</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="max_concurrent_downloads" class="form-label">Max concurrent downloads</label>
+                        <input type="number" name="max_concurrent_downloads" id="max_concurrent_downloads"
+                               class="form-input" min="1" max="10">
+                        <div class="form-help">Number of simultaneous downloads (1-10)</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="default_video_format" class="form-label">Default video format</label>
+                        <select name="default_video_format" id="default_video_format" class="form-select">
+                            <option value="mp4">MP4</option>
+                            <option value="mkv">MKV</option>
+                            <option value="webm">WebM</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="default_audio_format" class="form-label">Default audio format</label>
+                        <select name="default_audio_format" id="default_audio_format" class="form-select">
+                            <option value="mp3">MP3</option>
+                            <option value="m4a">M4A</option>
+                            <option value="wav">WAV</option>
+                            <option value="flac">FLAC</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="default_video_quality" class="form-label">Default video quality</label>
+                        <select name="default_video_quality" id="default_video_quality" class="form-select">
+                            <option value="best">Best available</option>
+                            <option value="4k">4K (2160p)</option>
+                            <option value="2k">2K (1440p)</option>
+                            <option value="1080p">1080p</option>
+                            <option value="720p">720p</option>
+                            <option value="480p">480p</option>
+                            <option value="360p">360p</option>
+                            <option value="worst">Smallest size</option>
+                        </select>
+                    </div>
+                </fieldset>
+
+                <fieldset class="settings-group">
+                    <legend class="settings-legend">Network</legend>
+
+                    <div class="form-group">
+                        <label for="playlist_load_timeout_seconds" class="form-label">Playlist load timeout (seconds)</label>
+                        <input type="number" name="playlist_load_timeout_seconds" id="playlist_load_timeout_seconds"
+                               class="form-input" min="10" max="1800">
+                        <div class="form-help">How long to wait for a playlist to load before giving up. Raise this on slow networks or for very large playlists (10-1800)</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="download_start_timeout_seconds" class="form-label">Download start timeout (seconds)</label>
+                        <input type="number" name="download_start_timeout_seconds" id="download_start_timeout_seconds"
+                               class="form-input" min="10" max="1800">
+                        <div class="form-help">How long to wait when fetching video info before a download starts. Raise this on slow networks (10-1800)</div>
+                    </div>
+                </fieldset>
+
+                <fieldset class="settings-group">
+                    <legend class="settings-legend">System</legend>
+
+                    <div class="form-group">
+                        <label for="port" class="form-label">Server port</label>
+                        <input type="number" name="port" id="port" class="form-input" min="1" max="65535">
+                        <div class="form-help">Requires restart to take effect</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="cookies_file_path" class="form-label">Cookies file</label>
+                        <input type="text" name="cookies_file_path" id="cookies_file_path" class="form-input"
+                               placeholder="(none)" readonly>
+                        <div class="form-help">Netscape-format cookies.txt for sites that need a login or block anonymous access. One file holds cookies for many sites; yt-dlp sends only those matching each URL. Upload below to manage it from here. The path is read-only: to point at a custom location (e.g. a Docker volume) set cookies_file_path in config.json. Applies to downloads and URL validation.</div>
+                        <div class="cookies-upload" style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                            <input type="file" id="cookies_file_input" accept=".txt,text/plain" style="display: none;">
+                            <button type="button" id="cookies_upload_btn" class="btn btn-secondary">Upload cookies.txt</button>
+                            <button type="button" id="cookies_remove_btn" class="btn btn-secondary" style="display: none;">Remove</button>
+                        </div>
+                        <div id="cookies_status" class="form-help" style="margin-top: 0.35rem;">Checking cookies file...</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="completed_file_expiry_hours" class="form-label">File expiry (hours)</label>
+                        <input type="number" name="completed_file_expiry_hours" id="completed_file_expiry_hours"
+                               class="form-input" min="0">
+                        <div class="form-help">Auto-remove completed downloads after this many hours (0 = never)</div>
+                    </div>
+                </fieldset>
+
+                <fieldset class="settings-group">
+                    <legend class="settings-legend">Advanced</legend>
+
+                    <div class="form-group">
+                        <label class="check-row">
+                            <input type="checkbox" name="verbose_logging" id="verbose_logging">
+                            <span>Verbose logging</span>
+                        </label>
+                        <div class="form-help">Detailed logs for debugging</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="check-row">
+                            <input type="checkbox" name="reencode_for_compatibility" id="reencode_for_compatibility">
+                            <span>Re-encode video for compatibility</span>
+                        </label>
+                        <div class="form-help">When on, any download not already H.264 + AAC is transcoded to H.264 + AAC for older devices. This overrides the codecs of the format you choose, so a non-MP4 pick will not keep its native codecs. Off by default: downloads keep the exact format you select. You can still transcode an individual file later with its Convert button.</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="check-row">
+                            <input type="checkbox" name="enable_hardware_acceleration" id="enable_hardware_acceleration">
+                            <span>Hardware acceleration</span>
+                        </label>
+                        <div class="form-help">Use GPU acceleration for video processing (only applies when re-encoding)</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="check-row">
+                            <input type="checkbox" name="optimize_for_low_power" id="optimize_for_low_power">
+                            <span>Optimize for low power</span>
+                        </label>
+                        <div class="form-help">Reduce CPU usage on battery-powered devices</div>
+                    </div>
+                </fieldset>
+
+                <fieldset class="settings-group">
+                    <legend class="settings-legend">Versions</legend>
+
+                    <div class="version-row">
+                        <span class="version-label">yt-dlp</span>
+                        <div class="version-value">
+                            <span id="ytdlp-version" class="mono">checking</span>
+                            <button type="button" id="check-updates" class="btn btn-secondary btn-sm">
+                                <svg class="icon icon-sm" aria-hidden="true"><use href="#i-refresh"></use></svg>
+                                <span class="btn-text">Check</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="version-row">
+                        <span class="version-label">ffmpeg</span>
+                        <span id="ffmpeg-version" class="mono">checking</span>
+                    </div>
+
+                    <button type="button" id="update-ytdlp" class="btn btn-secondary btn-sm" disabled>
+                        <svg class="icon icon-sm" aria-hidden="true"><use href="#i-download"></use></svg>
+                        <span class="btn-text">Update yt-dlp</span>
+                    </button>
+                </fieldset>
+
+                <div class="settings-actions">
+                    <button type="submit" id="save-settings" class="btn btn-primary">
+                        <svg class="icon icon-sm" aria-hidden="true"><use href="#i-save"></use></svg>
+                        <span class="btn-text">Save settings</span>
+                    </button>
+                    <button type="button" id="reset-settings" class="btn btn-secondary">
+                        <svg class="icon icon-sm" aria-hidden="true"><use href="#i-rotate-ccw"></use></svg>
+                        <span class="btn-text">Reset to defaults</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </aside>
+
+    <dialog id="media-player-modal" class="media-modal" aria-labelledby="media-modal-title">
+      <div class="media-modal-content">
+        <div class="media-modal-header">
+          <span id="media-modal-title" class="media-modal-title"></span>
+          <button type="button" id="media-modal-close" class="btn btn-secondary btn-sm" aria-label="Close player">Close</button>
+        </div>
+        <div id="media-modal-mount" class="media-modal-mount"></div>
+      </div>
+    </dialog>
+
+    <script type="module" src="/assets/js/app.js"></script>
+
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/assets/sw.js').catch(() => {});
+        });
+      }
+    </script>
+</body>
+</html>

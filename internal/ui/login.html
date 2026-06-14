@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>goyt - Sign in</title>
+  <style>
+    :root {
+      --bg: #27282c; --text: #e8e8ea; --dim: #a8a8ad; --faint: #6b6b70;
+      --accent: #3b73f7; --accent-bright: #5a8bff; --accent-ink: #0c0d10;
+      --bad: #e06c5b; --rule: rgb(255 255 255 / 10%);
+      --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    }
+    @font-face {
+      font-family: "JetBrains Mono"; font-style: normal; font-weight: 400; font-display: swap;
+      src: url("/assets/fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2");
+    }
+    @font-face {
+      font-family: "JetBrains Mono"; font-style: normal; font-weight: 700; font-display: swap;
+      src: url("/assets/fonts/jetbrains-mono-latin-700-normal.woff2") format("woff2");
+    }
+    * { box-sizing: border-box; }
+    body { font-family: var(--mono); display: flex; min-height: 100vh; align-items: center;
+      justify-content: center; margin: 0; background: var(--bg); color: var(--text); color-scheme: dark; }
+    .login { width: 100%; max-width: 360px; padding: 24px; container-type: inline-size; }
+    .banner { margin: 0 0 20px; font-size: 3.8cqw; line-height: 1.05;
+      /* Single complete system monospace: the block-element glyphs are not in
+         the bundled JetBrains Mono latin subset, and mixing fonts drifts the
+         columns (matches the main UI .banner fix). */
+      font-family: ui-monospace, "Cascadia Mono", Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace;
+      color: var(--accent); white-space: pre; overflow: hidden; }
+    h1 { font-size: 14px; font-weight: 700; margin: 0 0 18px; color: var(--dim);
+      text-transform: uppercase; letter-spacing: 0.08em; }
+    label { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--dim); margin-bottom: 8px; }
+    input { width: 100%; padding: 9px 2px; border: 0; border-bottom: 1px solid var(--rule);
+      background: transparent; color: var(--text); font: inherit; }
+    input:focus { outline: none; border-bottom-color: var(--accent); }
+    button { width: 100%; margin-top: 20px; padding: 10px; border: 0; border-radius: 0;
+      background: var(--accent); color: var(--accent-ink); font: inherit; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer; }
+    button:hover { background: var(--accent-bright); }
+    .err { color: var(--bad); font-size: 12px; min-height: 1.2rem; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <form class="login" id="login-form">
+    <pre class="banner" aria-label="goyt">  ▐▄▄▄▄▄▄▄▌ ▐▄▄▄▄▄▄▌ ▐▄▄▌  ▐▄▄▌▐▄▄▄▄▄▄▄▄▌
+ ▐██▌      ▐██▌  ▐██▌▐██▌  ▐██▌   ▐██▌
+ ▐██▌▐████▌▐██▌  ▐██▌ ▐███████▌   ▐██▌
+ ▐▀▀▌  ▐▀▀▌▐▀▀▌  ▐▀▀▌      ▐▀▀▌   ▐▀▀▌
+  ▐▄▄▄▄▄▄▄▌ ▐▄▄▄▄▄▄▌ ▐▄▄▄▄▄▄▄▌    ▐▄▄▌</pre>
+    <h1>Sign in</h1>
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password" autocomplete="current-password" autofocus required>
+    <div class="err" id="error" role="alert"></div>
+    <button type="submit">Sign in</button>
+  </form>
+  <script>
+    const form = document.getElementById('login-form');
+    const errEl = document.getElementById('error');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errEl.textContent = '';
+      const password = document.getElementById('password').value;
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password })
+        });
+        if (res.ok) { window.location.href = '/'; return; }
+        if (res.status === 429) {
+          errEl.textContent = 'Too many attempts. Please wait and try again.';
+        } else if (res.status >= 500) {
+          errEl.textContent = 'Server error. Please try again.';
+        } else {
+          errEl.textContent = 'Incorrect password.';
+        }
+      } catch (_) {
+        errEl.textContent = 'Network error. Please try again.';
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+# Build artifacts
+/goyt
+*.exe
+*.test
+*.out
+coverage.html
+
+# Runtime/local state (regenerated in the container)
+config.json
+config-*.json
+state.json
+downloads.json
+queue.json
+*.log
+*.pid
+*.lock
+downloads/
+output/
+temp/
+assets/yt-dlp/
+
+# Dependencies (reinstalled in the builder)
+node_modules/
+
+# VCS and tooling
+.git/
+.github/
+.gitignore
+*.md
+docs/
+tests/
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml

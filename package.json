@@ -1,0 +1,24 @@
+{
+  "name": "goyt",
+  "version": "2026.06.15",
+  "type": "module",
+  "description": "Self-hosted web interface for downloading video and audio with yt-dlp",
+  "scripts": {
+    "build-fonts": "mkdir -p ./internal/ui/assets/fonts && cp ./node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2 ./node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-500-normal.woff2 ./node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-700-normal.woff2 ./internal/ui/assets/fonts/",
+    "build-css": "npm run build-fonts && tailwindcss -i ./input.css -o ./internal/ui/assets/css/main.css --minify",
+    "watch-css": "tailwindcss -i ./input.css -o ./internal/ui/assets/css/main.css --watch",
+    "build": "npm run build-css && go build -ldflags=\"-s -w -X goyt/internal/api.Version=$npm_package_version\" -o goyt ./cmd/goyt",
+    "build-production": "npm run build-css && go build -ldflags=\"-s -w -X goyt/internal/api.Version=$npm_package_version\" -o goyt ./cmd/goyt",
+    "test-ui": "node tests/ui/puppeteer-tests.js",
+    "test-progress": "node tests/ui/progress-test.js",
+    "test": "go test ./... && npm run test-ui"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.1",
+    "puppeteer": "^25.1.0",
+    "tailwindcss": "^4.3.1"
+  },
+  "dependencies": {
+    "@fontsource/jetbrains-mono": "^5.2.8"
+  }
+}
