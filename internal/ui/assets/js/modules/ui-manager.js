@@ -60,7 +60,12 @@ export class UIManager {
     document.body.appendChild(container);
   }
 
-  showNotification(message, type = 'info', duration = 5000) {
+  showNotification(message, type = 'info', duration = null) {
+    // Errors linger so failures stay readable; other toasts clear sooner.
+    if (duration === null) {
+      duration = type === 'error' ? 5000 : 3500;
+    }
+
     const notification = document.createElement('div');
     notification.className = `card notification notification-${type}`;
 
@@ -158,7 +163,7 @@ export class UIManager {
       container.innerHTML = `
         <div class="flex items-center gap-2" style="color: var(--warn)">
           ${icon('alert-triangle', 'icon-sm')}
-          <span class="text-sm">Couldn't verify this URL ahead of time. You can still start the download.</span>
+          <span class="text-sm">Couldn't verify URL, but you can still try download.</span>
         </div>
       `;
     }
@@ -195,25 +200,20 @@ export class UIManager {
     if (!container) return;
 
     container.innerHTML = `
-      <div class="card">
+      <div class="card" style="margin-bottom:24px">
         <div class="card-body">
-          <h5 class="card-title">Playlist Detected (${playlistInfo.playlist_count || 'multiple'} videos)</h5>
-          <p class="text-sm text-secondary mb-md">
-            Choose how you want to download from this playlist.
-          </p>
-          <div class="flex gap-2 flex-wrap">
+          <h5 class="card-title" style="margin-bottom:12px">Playlist detected (${playlistInfo.playlist_count || 'multiple'} videos)</h5>
+          <div class="flex gap-2 flex-wrap items-center">
             <button type="button" class="btn btn-primary btn-sm" id="download-playlist">
               ${icon('list', 'icon-sm')}
-              <span class="btn-text">Download Playlist (${playlistInfo.playlist_count || 'all'} videos)</span>
+              <span class="btn-text">All ${playlistInfo.playlist_count ? playlistInfo.playlist_count + ' ' : ''}videos</span>
             </button>
-            <div class="flex flex-col">
-              <button type="button" class="btn btn-secondary btn-sm" id="download-first-video">
-                ${icon('play', 'icon-sm')}
-                <span class="btn-text">Download First Video Only</span>
-              </button>
-              ${playlistInfo.first_video_title ? `<div class="text-xs text-muted mt-1 max-w-64 truncate" title="${this.escapeHtml(playlistInfo.first_video_title)}">${this.escapeHtml(playlistInfo.first_video_title)}</div>` : ''}
-            </div>
+            <button type="button" class="btn btn-secondary btn-sm" id="download-first-video">
+              ${icon('play', 'icon-sm')}
+              <span class="btn-text">First only</span>
+            </button>
           </div>
+          ${playlistInfo.first_video_title ? `<div class="text-xs text-muted mt-1 truncate" title="${this.escapeHtml(playlistInfo.first_video_title)}">${this.escapeHtml(playlistInfo.first_video_title)}</div>` : ''}
         </div>
       </div>
     `;

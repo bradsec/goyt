@@ -91,6 +91,7 @@ type Download struct {
 	Title         string           `json:"title"`
 	Filename      string           `json:"filename"`
 	OutputPath    string           `json:"output_path"`
+	FileSize      int64            `json:"file_size,omitempty"` // Final size in bytes, set on completion
 	CreatedAt     time.Time        `json:"created_at"`
 	CompletedAt   *time.Time       `json:"completed_at,omitempty"`
 	Error         string           `json:"error,omitempty"`
@@ -395,6 +396,12 @@ func (d *Downloader) Download(
 		log.Printf("[DOWNLOAD] %s: Warning - could not locate downloaded file in %s", download.ID, req.OutputDir)
 	}
 
+	if download.OutputPath != "" {
+		if info, statErr := os.Stat(download.OutputPath); statErr == nil {
+			download.FileSize = info.Size()
+		}
+	}
+
 	download.Status = StatusCompleted
 	now := time.Now()
 	download.CompletedAt = &now
@@ -513,8 +520,15 @@ func (d *Downloader) buildYtDlpArgs(req DownloadRequest, download *Download) []s
 	args = append(args, d.cookieArgs()...)
 	args = append(args, d.jsRuntimeArgs()...)
 
-	// Always enable progress for UI updates, but control verbosity
-	args = append(args, "--progress", "--newline")
+	// Always enable progress for UI updates, but control verbosity.
+	// The progress template emits machine-readable byte counts on every tick so
+	// the UI shows a determinate "X% of <size>" bar instead of a bare spinner,
+	// regardless of fragmented/DASH formats where the human-readable line is
+	// unreliable. Fields are pipe-delimited and prefixed for unambiguous parsing.
+	args = append(args, "--progress", "--newline",
+		"--progress-template",
+		"download:[goyt-dl] %(progress.downloaded_bytes)s|%(progress.total_bytes)s|"+
+			"%(progress.total_bytes_estimate)s|%(progress._speed_str)s|%(progress._eta_str)s")
 
 	// Add verbose or quiet flags based on verbose logging setting
 	if utils.VerboseLogging {
@@ -1493,9 +1507,20 @@ func (m *progressMonitor) handleFFmpegProcessing(line string) {
 	_ = line
 }
 
+// goytProgressPrefix marks the machine-readable progress line emitted by our
+// --progress-template. Parsing this is preferred over the human-readable regexes.
+const goytProgressPrefix = "[goyt-dl]"
+
 // processDownloadProgress processes download progress from yt-dlp
 func (m *progressMonitor) processDownloadProgress(line string) {
-	// Try each regex pattern for progress
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, goytProgressPrefix) {
+		m.handleTemplateProgress(strings.TrimSpace(strings.TrimPrefix(trimmed, goytProgressPrefix)))
+		return
+	}
+
+	// Try each regex pattern for progress (fallback for older yt-dlp or when the
+	// template field is unavailable).
 	for i, progressRegex := range m.progressRegexes {
 		if matches := progressRegex.FindStringSubmatch(line); matches != nil {
 			if utils.VerboseLogging {
@@ -1531,6 +1556,101 @@ func (m *progressMonitor) processDownloadProgress(line string) {
 	if utils.VerboseLogging && !m.isPostProcessing.Load() && strings.Contains(line, "[download]") {
 		utils.LogDebugf("[DOWNLOAD] %s: Unmatched download line: %s", m.downloadID, line)
 	}
+}
+
+// handleTemplateProgress parses the pipe-delimited payload emitted by our
+// --progress-template: downloaded|total|estimate|speed|eta. It computes the
+// percentage from exact byte counts and formats the total size for the UI.
+func (m *progressMonitor) handleTemplateProgress(payload string) {
+	parts := strings.Split(payload, "|")
+	if len(parts) < 5 {
+		return
+	}
+
+	downloaded := parseBytesField(parts[0])
+	total := parseBytesField(parts[1])
+	if total <= 0 {
+		total = parseBytesField(parts[2]) // fall back to the estimate
+	}
+	speed := cleanTemplateField(parts[3])
+	eta := cleanTemplateField(parts[4])
+
+	if !m.isPostProcessing.Load() {
+		m.updatePhase("downloading")
+	}
+
+	var percentage float64
+	if total > 0 {
+		percentage = float64(downloaded) / float64(total) * 100
+		if percentage > 100 {
+			percentage = 100
+		}
+	}
+
+	if percentage >= 100.0 && downloaded > 0 && !m.isPostProcessing.Load() {
+		m.handleDownloadCompletion()
+		return
+	}
+
+	if percentage != m.lastPercentage {
+		m.lastPercentage = percentage
+	}
+
+	size := ""
+	if total > 0 {
+		size = formatBytes(total)
+	} else if downloaded > 0 {
+		size = formatBytes(downloaded)
+	}
+
+	m.safeProgressSend(DownloadProgress{
+		Percentage: percentage,
+		Speed:      speed,
+		ETA:        eta,
+		Size:       size,
+		Phase:      "downloading",
+	})
+}
+
+// parseBytesField parses a yt-dlp progress byte field, treating "NA"/"None"/
+// empty as unknown (returns -1).
+func parseBytesField(s string) int64 {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "NA" || s == "None" {
+		return -1
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return -1
+	}
+	return int64(v)
+}
+
+// cleanTemplateField trims padding and normalizes unknown values to "".
+func cleanTemplateField(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "NA" || s == "None" {
+		return ""
+	}
+	return s
+}
+
+// formatBytes renders a byte count as a human-readable size (e.g. "1.2 GB").
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	units := []string{"KB", "MB", "GB", "TB", "PB"}
+	if exp >= len(units) {
+		exp = len(units) - 1
+	}
+	return fmt.Sprintf("%.1f %s", float64(b)/float64(div), units[exp])
 }
 
 // handleDownloadCompletion handles when download reaches 100%

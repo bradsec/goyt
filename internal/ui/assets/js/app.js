@@ -122,6 +122,7 @@ class goytApp {
     try {
       await this.downloadManager.startDownload(downloadData);
       event.target.reset();
+      this.uiManager.clearUrlValidation();
     } catch (error) {
       console.error('Download submission failed:', error);
       this.uiManager.showNotification('Failed to start download', 'error');
@@ -143,8 +144,8 @@ class goytApp {
     // up to ~60s) does not look frozen.
     this.uiManager.showUrlValidating('Validating URL...');
     const progressTimers = [
-      setTimeout(() => this.uiManager.showUrlValidating('Checking for a playlist...'), 3000),
-      setTimeout(() => this.uiManager.showUrlValidating('Still working... large playlists or slow networks can take a while.'), 10000),
+      setTimeout(() => this.uiManager.showUrlValidating('Still checking...'), 3000),
+      setTimeout(() => this.uiManager.showUrlValidating('Hang tight...'), 10000),
     ];
     const clearProgressTimers = () => progressTimers.forEach(clearTimeout);
 

@@ -105,9 +105,8 @@ export class DownloadManager {
       // The server enumerates the playlist before the download is added, which
       // can take a while on large playlists or slow networks. Give immediate
       // feedback so the UI does not look idle during that background work.
-      this.uiManager.showNotification('Fetching playlist info, this can take a while for large playlists...', 'info');
-
       if (type === 'playlist') {
+        this.uiManager.showNotification('Fetching playlist info, this can take a while for large playlists...', 'info');
         await this.apiClient.startPlaylistDownload(
           downloadData.url,
           downloadData.type,
@@ -116,6 +115,7 @@ export class DownloadManager {
         );
         this.uiManager.showNotification('Playlist download started', 'success');
       } else if (type === 'first') {
+        this.uiManager.showNotification('Fetching first video...', 'info');
         await this.apiClient.downloadFirstVideo(
           downloadData.url,
           downloadData.type,
@@ -412,6 +412,7 @@ export class DownloadManager {
             <span class="text-sm text-secondary">${this.escapeHtml(download.quality)}</span>
             <span class="text-sm text-secondary">${this.escapeHtml(download.format)}</span>
             ${this.renderCodecBadge(download)}
+            ${this.renderFileSize(download)}
           </div>
           <div class="text-sm text-secondary">
             ${this.uiManager.formatDate(this.getRelevantDate(download, sectionKey))}
@@ -423,6 +424,24 @@ export class DownloadManager {
         ${this.renderDownloadActions(download, sectionKey)}
       </div>
     `;
+  }
+
+  // Shows the final file size on completed entries, e.g. "1.2 GB".
+  renderFileSize(download) {
+    const terminal = ['completed', 'already_exists'];
+    if (!terminal.includes(download.status) || !download.file_size) return '';
+    return `<span class="text-sm text-secondary">[${this.formatBytes(download.file_size)}]</span>`;
+  }
+
+  formatBytes(bytes) {
+    const b = Number(bytes);
+    if (!b || b < 0) return '';
+    const unit = 1024;
+    if (b < unit) return `${b} B`;
+    const units = ['KB', 'MB', 'GB', 'TB', 'PB'];
+    let exp = Math.floor(Math.log(b) / Math.log(unit));
+    if (exp > units.length) exp = units.length;
+    return `${(b / Math.pow(unit, exp)).toFixed(1)} ${units[exp - 1]}`;
   }
 
   renderStatusBadge(status) {
@@ -460,7 +479,7 @@ export class DownloadManager {
       const map = { h264: 'H.264', hevc: 'HEVC', aac: 'AAC', vp9: 'VP9', vp8: 'VP8', av1: 'AV1', opus: 'Opus', vorbis: 'Vorbis' };
       return map[c.toLowerCase()] || c.toUpperCase();
     };
-    const parts = [pretty(v), pretty(a)].filter(Boolean).join(' · ');
+    const parts = [pretty(v), pretty(a)].filter(Boolean).join(' ');
     return `<span class="text-sm text-secondary">${this.escapeHtml(parts)}</span>`;
   }
 
@@ -481,7 +500,10 @@ export class DownloadManager {
 
     const stats = [];
     if (stage.showPercent) {
-      stats.push(`<span>${boundedPercentage.toFixed(1)}%</span>`);
+      const sizeSuffix = (download.status === 'downloading' && progress.size)
+        ? ` of ${this.escapeHtml(progress.size)}`
+        : '';
+      stats.push(`<span>${boundedPercentage.toFixed(1)}%${sizeSuffix}</span>`);
     }
     if (progress.speed) {
       stats.push(`<span class="flex items-center gap-1">${icon('gauge', 'icon-xs')} ${this.escapeHtml(progress.speed)}</span>`);

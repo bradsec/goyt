@@ -961,6 +961,7 @@ func (dm *DownloadManager) processDownload(download *core.Download) {
 		download.Title = completedDownload.Title
 		download.Filename = completedDownload.Filename
 		download.OutputPath = completedDownload.OutputPath
+		download.FileSize = completedDownload.FileSize
 		download.CompletedAt = completedDownload.CompletedAt
 
 		if download.Type == core.VideoDownload && download.OutputPath != "" {
