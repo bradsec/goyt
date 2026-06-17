@@ -14,7 +14,14 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
-RUN npm run build-production
+
+# Version stamped into the binary. Defaults to package.json so a plain
+# `docker build` matches the npm build; CI passes the git tag via
+# `--build-arg VERSION=$TAG` to keep the image in sync with releases.
+ARG VERSION
+RUN npm run build-css \
+    && go build -ldflags="-s -w -X goyt/internal/api.Version=${VERSION:-$(node -p "require('./package.json').version")}" \
+        -o goyt ./cmd/goyt
 
 # Runtime stage.
 # Alpine 3.22 ships deno 2.x; older releases (3.20) only have deno 1.43, which

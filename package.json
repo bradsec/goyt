@@ -1,6 +1,6 @@
 {
   "name": "goyt",
-  "version": "2026.06.16",
+  "version": "2026.06.17",
   "type": "module",
   "description": "Self-hosted web interface for downloading video and audio with yt-dlp",
   "scripts": {

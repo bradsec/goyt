@@ -1,6 +1,11 @@
 services:
   goyt:
-    build: .
+    build:
+      context: .
+      args:
+        # Override the stamped version, e.g. VERSION=2026.06.17 docker compose build.
+        # Unset falls back to the package.json version.
+        VERSION: ${VERSION:-}
     image: goyt
     container_name: goyt
     restart: unless-stopped
