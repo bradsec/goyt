@@ -153,45 +153,21 @@ export class ApiClient {
   }
 
   async downloadFile(id) {
-    const url = `${this.baseUrl}/api/downloads/${id}/download`;
-    
-    try {
-      const response = await fetch(url);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
+    // Stream through the browser's native download manager instead of buffering
+    // the whole file into memory with fetch()+blob(). For multi-GB files the
+    // blob approach freezes the tab and shows no progress until the entire file
+    // is in RAM, then the save dialog appears all at once. A direct navigation
+    // lets the browser stream straight to disk with its own progress UI. The
+    // server sets Content-Disposition: attachment and Content-Length, so the
+    // filename and progress bar come from the response headers.
+    const link = document.createElement('a');
+    link.href = `${this.baseUrl}/api/downloads/${id}/download`;
+    link.rel = 'noopener';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 
-      // Create download link
-      const blob = await response.blob();
-      const downloadUrl = URL.createObjectURL(blob);
-      
-      // Extract filename from Content-Disposition header
-      const contentDisposition = response.headers.get('Content-Disposition');
-      let filename = 'download';
-      
-      if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-        if (filenameMatch && filenameMatch[1]) {
-          filename = filenameMatch[1].replace(/['"]/g, '');
-        }
-      }
-
-      // Trigger download
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      // Clean up
-      URL.revokeObjectURL(downloadUrl);
-      
-      return { success: true, filename };
-    } catch (error) {
-      throw new Error(`Download failed: ${error.message}`);
-    }
+    return { success: true };
   }
 
   // Bulk operations

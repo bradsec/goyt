@@ -20,17 +20,17 @@ TESTS_FAILED=0
 
 # Helper functions
 pass() {
-    echo -e "${GREEN}✓${NC} $1"
+    echo -e "${GREEN}[PASS]${NC} $1"
     ((TESTS_PASSED++))
 }
 
 fail() {
-    echo -e "${RED}✗${NC} $1"
+    echo -e "${RED}[FAIL]${NC} $1"
     ((TESTS_FAILED++))
 }
 
 warn() {
-    echo -e "${YELLOW}⚠${NC} $1"
+    echo -e "${YELLOW}[WARN]${NC} $1"
 }
 
 info() {
@@ -395,11 +395,11 @@ main() {
     echo ""
     
     if [ $TESTS_FAILED -eq 0 ]; then
-        echo -e "${GREEN}🎉 All critical tests passed!${NC}"
+        echo -e "${GREEN}All critical tests passed!${NC}"
         echo "The goyt web interface appears to be working correctly."
         exit 0
     else
-        echo -e "${RED}❌ Some tests failed.${NC}"
+        echo -e "${RED}Some tests failed.${NC}"
         echo "Please review the failures above and fix any issues."
         exit 1
     fi

@@ -22,7 +22,7 @@ class ProgressTestSuite {
   }
 
   async setup() {
-    console.log('🚀 Setting up progress test environment...');
+    console.log('Setting up progress test environment...');
     
     await this.startTestServer();
     
@@ -36,15 +36,15 @@ class ProgressTestSuite {
     await this.page.setViewport({ width: 1920, height: 1080 });
     
     // Enable console logging
-    this.page.on('console', msg => console.log('🖥️  PAGE:', msg.text()));
-    this.page.on('pageerror', err => console.log('❌ PAGE ERROR:', err.message));
+    this.page.on('console', msg => console.log('PAGE:', msg.text()));
+    this.page.on('pageerror', err => console.log('PAGE ERROR:', err.message));
     
-    console.log('✅ Progress test environment ready');
+    console.log('Progress test environment ready');
   }
 
   async startTestServer() {
     return new Promise((resolve, reject) => {
-      console.log('🔄 Starting test server...');
+      console.log('Starting test server...');
       
       const testConfig = {
         "download_path": "./test-downloads",
@@ -68,16 +68,26 @@ class ProgressTestSuite {
         stdio: 'pipe'
       });
       
-      this.server.stdout.on('data', (data) => {
-        const output = data.toString();
-        console.log('📊 SERVER:', output.trim());
-        if (output.includes('Server is ready and listening')) {
+      // The readiness line is emitted by the standard logger, which writes to
+      // stderr, so watch both streams and match the actual "listening on" text.
+      let ready = false;
+      const watchForReady = (output) => {
+        if (!ready && output.includes('listening on')) {
+          ready = true;
           setTimeout(resolve, 3000);
         }
+      };
+
+      this.server.stdout.on('data', (data) => {
+        const output = data.toString();
+        console.log('SERVER:', output.trim());
+        watchForReady(output);
       });
-      
+
       this.server.stderr.on('data', (data) => {
-        console.log('⚠️  SERVER ERROR:', data.toString());
+        const output = data.toString();
+        console.log('SERVER ERROR:', output);
+        watchForReady(output);
       });
       
       this.server.on('error', reject);
@@ -86,7 +96,7 @@ class ProgressTestSuite {
   }
 
   async teardown() {
-    console.log('🧹 Cleaning up...');
+    console.log('Cleaning up...');
     
     if (this.page) await this.page.close();
     if (this.browser) await this.browser.close();
@@ -101,12 +111,12 @@ class ProgressTestSuite {
         fs.rmSync('./test-downloads', { recursive: true, force: true });
       }
     } catch (err) {
-      console.log('⚠️  Cleanup warning:', err.message);
+      console.log('Cleanup warning:', err.message);
     }
   }
 
   async testProgressBarUpdates() {
-    console.log('🧪 Testing progress bar updates...');
+    console.log('Testing progress bar updates...');
     
     await this.page.goto(this.baseURL);
     await this.page.waitForSelector('#download-form', { timeout: 15000 });
@@ -114,19 +124,19 @@ class ProgressTestSuite {
     // Test with a short video that should show progress
     const testURL = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'; // Rick Roll - short video
     
-    console.log('📝 Entering test URL:', testURL);
+    console.log('Entering test URL:', testURL);
     await this.page.type('#url-input', testURL);
     
     // Set to 360p for faster download
     await this.page.select('#quality-select', '360p');
     
-    console.log('🎬 Starting download...');
+    console.log('Starting download...');
     await this.page.click('#submit-button');
     
     // Wait for download to appear in the list  
     await this.page.waitForSelector('.downloads-section .download-item, .download-entry, [data-download-id]', { timeout: 20000 });
     
-    console.log('📊 Monitoring progress updates...');
+    console.log('Monitoring progress updates...');
     
     const progressUpdates = [];
     let lastProgress = -1;
@@ -172,7 +182,7 @@ class ProgressTestSuite {
           }
           
           if (currentProgress !== null && currentProgress !== lastProgress) {
-            console.log(`📈 Progress update: ${currentProgress}%`);
+            console.log(`Progress update: ${currentProgress}%`);
             progressUpdates.push({
               timestamp: Date.now() - startTime,
               progress: currentProgress,
@@ -181,7 +191,7 @@ class ProgressTestSuite {
             lastProgress = currentProgress;
             
             if (currentProgress >= 100) {
-              console.log('✅ Download completed!');
+              console.log('Download completed!');
               return progressUpdates;
             }
           }
@@ -192,7 +202,7 @@ class ProgressTestSuite {
         for (const statusEl of statusElements) {
           const status = await this.page.evaluate(el => el.textContent, statusEl);
           if (status.includes('completed') || status.includes('failed') || status.includes('error')) {
-            console.log(`🏁 Download status: ${status}`);
+            console.log(`Download status: ${status}`);
             return progressUpdates;
           }
         }
@@ -200,17 +210,17 @@ class ProgressTestSuite {
         await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
         
       } catch (error) {
-        console.log('⚠️  Progress monitoring error:', error.message);
+        console.log('Progress monitoring error:', error.message);
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
     }
     
-    console.log('⏰ Progress monitoring timed out');
+    console.log('Progress monitoring timed out');
     return progressUpdates;
   }
 
   async testAPIProgressEndpoint() {
-    console.log('🧪 Testing API progress endpoint...');
+    console.log('Testing API progress endpoint...');
     
     const response = await this.page.evaluate(async (baseURL) => {
       try {
@@ -222,7 +232,7 @@ class ProgressTestSuite {
       }
     }, this.baseURL);
     
-    console.log('📊 API Response:', JSON.stringify(response, null, 2));
+    console.log('API Response:', JSON.stringify(response, null, 2));
     return response;
   }
 
@@ -230,28 +240,28 @@ class ProgressTestSuite {
     try {
       await this.setup();
       
-      console.log('\\n🎯 Starting Progress Bar Test Suite');
+      console.log('\\nStarting Progress Bar Test Suite');
       console.log('='.repeat(50));
       
       // Test API endpoint first
       const apiResponse = await this.testAPIProgressEndpoint();
-      console.log('✅ API test completed');
+      console.log('API test completed');
       
       // Test progress bar updates
       const progressUpdates = await this.testProgressBarUpdates();
       
-      console.log('\\n📊 Progress Test Results:');
+      console.log('\\nProgress Test Results:');
       console.log('='.repeat(30));
       console.log(`Total progress updates captured: ${progressUpdates.length}`);
       
       if (progressUpdates.length > 0) {
-        console.log('✅ Progress updates are working!');
+        console.log('Progress updates are working!');
         console.log('Progress timeline:');
         progressUpdates.forEach((update, i) => {
           console.log(`  ${i + 1}. ${update.timestamp}ms: ${update.progress}%`);
         });
       } else {
-        console.log('❌ No progress updates detected - progress bar may be broken');
+        console.log('No progress updates detected - progress bar may be broken');
       }
       
       // Generate report
@@ -264,7 +274,7 @@ class ProgressTestSuite {
       };
       
       fs.writeFileSync('./progress-test-report.json', JSON.stringify(report, null, 2));
-      console.log('\\n📝 Detailed report saved to progress-test-report.json');
+      console.log('\\nDetailed report saved to progress-test-report.json');
       
       return report.testResult === 'PASS';
       
@@ -279,11 +289,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const testSuite = new ProgressTestSuite();
   testSuite.runProgressTests()
     .then(success => {
-      console.log(success ? '\\n🎉 Progress tests PASSED!' : '\\n💥 Progress tests FAILED!');
+      console.log(success ? '\\nProgress tests PASSED!' : '\\nProgress tests FAILED!');
       process.exit(success ? 0 : 1);
     })
     .catch(error => {
-      console.error('🔥 Progress test suite failed:', error);
+      console.error('Progress test suite failed:', error);
       process.exit(1);
     });
 }

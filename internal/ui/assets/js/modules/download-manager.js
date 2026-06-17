@@ -11,7 +11,7 @@ export class DownloadManager {
     this.uiManager = uiManager;
     this.downloads = [];
     this.lastUpdateHash = new Map(); // Track last update hash for each download
-    this.lastSectionCounts = {}; // Track section counts to prevent unnecessary updates
+    this.renderedSections = {}; // Per-section render state for keyed DOM patching
     this.sections = {
       queued: { downloads: [], expanded: true },
       downloading: { downloads: [], expanded: true },
@@ -289,21 +289,12 @@ export class DownloadManager {
     const progressSpeed = download.progress?.speed || '';
     // Round percentage to 1 decimal place to allow gradual updates while avoiding micro-changes
     const roundedPercentage = Math.round((download.progress?.percentage || 0) * 10) / 10;
-    const key = `${download.id}_${download.status}_${roundedPercentage}_${progressPhase}_${progressFrame}_${progressETA}_${progressSpeed}_${download.title}_${download.error || ''}`;
+    // file_size and codecs land asynchronously after a download completes (stat
+    // + probe), so they must be in the hash or the card never repaints to show
+    // the final size / codec badge / convert action.
+    const meta = `${download.file_size || ''}_${download.video_codec || ''}_${download.audio_codec || ''}_${download.converted ? 1 : 0}`;
+    const key = `${download.id}_${download.status}_${roundedPercentage}_${progressPhase}_${progressFrame}_${progressETA}_${progressSpeed}_${download.title}_${download.error || ''}_${meta}`;
     return key;
-  }
-
-  // Check if downloads in a section have changed
-  hasSectionChanged(sectionKey, downloads) {
-    const newHashes = downloads.map(d => this.createDownloadHash(d));
-    const newHashString = newHashes.join('|');
-    const oldHashString = this.lastSectionCounts[sectionKey] || '';
-    
-    if (newHashString !== oldHashString) {
-      this.lastSectionCounts[sectionKey] = newHashString;
-      return true;
-    }
-    return false;
   }
 
   getSortFunction(sectionKey) {
@@ -377,23 +368,90 @@ export class DownloadManager {
       sectionElement.style.display = count > 0 ? 'block' : 'none';
     }
 
-    // Check if section content has actually changed
-    if (!this.hasSectionChanged(sectionKey, downloads)) {
-      return; // Skip rendering if nothing changed
-    }
-
-    console.log(`Updating ${sectionKey} section - content changed`);
+    this.renderedSections = this.renderedSections || {};
+    const prev = this.renderedSections[sectionKey];
 
     if (count === 0) {
-      container.innerHTML = '<p class="text-center text-muted">No downloads</p>';
+      if (prev !== null) {
+        container.innerHTML = '<p class="text-center text-muted">No downloads</p>';
+        this.renderedSections[sectionKey] = null;
+      }
       return;
     }
 
-    // Use requestAnimationFrame to prevent layout thrashing
-    requestAnimationFrame(() => {
-      const downloadsHtml = downloads.map((download, index) => this.renderDownloadItem(download, sectionKey, index)).join('');
-      container.innerHTML = `<div class="download-list">${downloadsHtml}</div>`;
+    const items = downloads.map((download, index) => ({
+      id: download.id,
+      status: download.status,
+      hash: this.createDownloadHash(download),
+      download,
+      index
+    }));
+    const orderKey = items.map(it => it.id).join('|');
+    const list = container.querySelector('.download-list');
+
+    // Rebuild fully only when the set or order of items changes. Otherwise patch
+    // in place so cards that did not change keep their running CSS animations,
+    // and the active card's progress bar keeps its smooth width transition
+    // instead of being recreated (and reset) on every 2s poll.
+    if (!list || !prev || prev.orderKey !== orderKey) {
+      const html = items.map(it => this.renderDownloadItem(it.download, sectionKey, it.index)).join('');
+      container.innerHTML = `<div class="download-list">${html}</div>`;
+      this.renderedSections[sectionKey] = { orderKey, items };
+      return;
+    }
+
+    const prevById = new Map(prev.items.map(it => [it.id, it]));
+    items.forEach((it) => {
+      const before = prevById.get(it.id);
+      if (before && before.hash === it.hash) return; // unchanged, leave it alone
+
+      const el = list.children[it.index];
+      if (!el) return;
+
+      // Active download: patch the mutable fields without replacing the node so
+      // the progress bar keeps its smooth width transition across polls. Other
+      // states (processing/converting) carry detail blocks that need a full
+      // re-render, so they fall through to node replacement.
+      if (before && before.status === it.status && it.status === 'downloading'
+          && this.updateItemInPlace(el, it.download, sectionKey, it.index)) {
+        return;
+      }
+
+      // Status changed (different badge/actions/progress): replace just this card.
+      const tmp = document.createElement('div');
+      tmp.innerHTML = this.renderDownloadItem(it.download, sectionKey, it.index);
+      const fresh = tmp.firstElementChild;
+      if (fresh) list.replaceChild(fresh, el);
     });
+
+    this.renderedSections[sectionKey] = { orderKey, items };
+  }
+
+  // Patches the live, changing parts of an existing card without recreating its
+  // DOM, preserving the progress bar's width transition and the indeterminate
+  // slide animation. Returns false if the card has no progress block to patch
+  // (terminal states), so the caller falls back to a full replace.
+  updateItemInPlace(el, download, sectionKey, index) {
+    const progressEl = el.querySelector('.download-progress');
+    if (!progressEl) return false;
+
+    const percentage = this.parsePercentage(download.progress?.percentage);
+    const bounded = Math.max(0, Math.min(100, percentage));
+    const stage = this.getStageInfo(download, bounded, sectionKey, index);
+
+    const labelEl = progressEl.querySelector('.stage-label');
+    if (labelEl) labelEl.textContent = stage.label;
+
+    const statsEl = progressEl.querySelector('.stage-stats');
+    if (statsEl) statsEl.innerHTML = this.buildProgressStats(download, bounded, stage);
+
+    const containerEl = progressEl.querySelector('.progress-container');
+    if (containerEl) containerEl.classList.toggle('progress-indeterminate', !!stage.indeterminate);
+
+    const barEl = progressEl.querySelector('.progress-bar');
+    if (barEl) barEl.style.width = `${stage.indeterminate ? 30 : bounded}%`;
+
+    return true;
   }
 
   renderDownloadItem(download, sectionKey, index = 0) {
@@ -498,6 +556,26 @@ export class DownloadManager {
       ffmpegProgressHtml = this.renderFFMPEGProgress(progress);
     }
 
+    const barWidth = stage.indeterminate ? 30 : boundedPercentage;
+
+    return `
+      <div class="download-progress">
+        <div class="download-stage">
+          <span class="stage-label">${stage.label}</span>
+          <span class="stage-stats">${this.buildProgressStats(download, boundedPercentage, stage)}</span>
+        </div>
+        <div class="progress-container ${stage.indeterminate ? 'progress-indeterminate' : ''}">
+          <div class="progress-bar" style="width: ${barWidth}%"></div>
+        </div>
+        ${ffmpegProgressHtml}
+      </div>
+    `;
+  }
+
+  // Builds the right-hand stats line (percent of size, speed, eta). Shared by
+  // the full render and the in-place patch so both stay identical.
+  buildProgressStats(download, boundedPercentage, stage) {
+    const progress = download.progress || {};
     const stats = [];
     if (stage.showPercent) {
       const sizeSuffix = (download.status === 'downloading' && progress.size)
@@ -511,21 +589,7 @@ export class DownloadManager {
     if (progress.eta) {
       stats.push(`<span class="flex items-center gap-1">${icon('clock', 'icon-xs')} eta ${this.escapeHtml(progress.eta)}</span>`);
     }
-
-    const barWidth = stage.indeterminate ? 30 : boundedPercentage;
-
-    return `
-      <div class="download-progress">
-        <div class="download-stage">
-          <span class="stage-label">${stage.label}</span>
-          <span class="stage-stats">${stats.join('')}</span>
-        </div>
-        <div class="progress-container ${stage.indeterminate ? 'progress-indeterminate' : ''}">
-          <div class="progress-bar" style="width: ${barWidth}%"></div>
-        </div>
-        ${ffmpegProgressHtml}
-      </div>
-    `;
+    return stats.join('');
   }
 
   // Stage drives the always-on feedback line: what the system is doing with
