@@ -172,7 +172,14 @@ func (dm *DownloadManager) AddDownload(req core.DownloadRequest) (*core.Download
 		if utils.VerboseLogging {
 			utils.LogDebugf("[MANAGER] Download %s added to queue successfully", download.ID)
 		}
-		return download, nil
+		// Return a snapshot, not the live object: once queued a worker may begin
+		// mutating it, and the API layer encodes this value without the manager
+		// lock. Copy under the lock so the caller gets a consistent point-in-time
+		// view that cannot race future progress/status writes (finding FIND-1).
+		dm.mutex.RLock()
+		snapshot := *download
+		dm.mutex.RUnlock()
+		return &snapshot, nil
 	default:
 		log.Printf("[MANAGER] Download queue is full, rejecting download %s", download.ID)
 		dm.mutex.Lock()
@@ -236,11 +243,24 @@ func (dm *DownloadManager) AddPlaylistDownload(req core.DownloadRequest) (*core.
 			delete(dm.downloads, download.ID)
 			delete(dm.progressChannels, download.ID)
 			dm.mutex.Unlock()
-			return firstDownload, nil
+			return dm.snapshotOf(firstDownload), nil
 		}
 	}
 
-	return firstDownload, nil
+	return dm.snapshotOf(firstDownload), nil
+}
+
+// snapshotOf returns a consistent copy of d taken under the lock, or nil for a
+// nil input. Used so callers never receive the live object that workers mutate
+// (finding FIND-1).
+func (dm *DownloadManager) snapshotOf(d *core.Download) *core.Download {
+	if d == nil {
+		return nil
+	}
+	dm.mutex.RLock()
+	defer dm.mutex.RUnlock()
+	snapshot := *d
+	return &snapshot
 }
 
 // GetDownload returns a snapshot copy of a download. Copies are returned so
