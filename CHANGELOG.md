@@ -5,6 +5,8 @@ versioning (CalVer): `YYYY.MM.DD`.
 
 ## [Unreleased]
 
+## [2026.06.17]
+
 ### Fixed
 
 - Large completed files now stream to disk through the browser's native download
