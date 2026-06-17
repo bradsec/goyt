@@ -27,25 +27,30 @@ func (dm *DownloadManager) GetStateFilePath() string {
 
 // SaveState persists the current download manager state to disk
 func (dm *DownloadManager) SaveState() error {
-	dm.mutex.RLock()
-	defer dm.mutex.RUnlock()
-
 	stateFile := StateFile{
 		Downloads: make(map[string]*core.Download),
 		SavedAt:   time.Now(),
 		Version:   StateVersion,
 	}
 
-	// Copy downloads to avoid locking issues
+	// Marshal under the lock so the snapshot is consistent, then release before
+	// touching disk: holding the read lock across file I/O would block every
+	// status and progress write for the duration of the write, which recurs on
+	// the 30s save timer (finding FIND-2). Deep-copy each record so the bytes are
+	// stable even though workers keep mutating the live objects after unlock.
+	dm.mutex.RLock()
 	for id, download := range dm.downloads {
-		stateFile.Downloads[id] = download
+		snapshot := *download
+		stateFile.Downloads[id] = &snapshot
 	}
+	dm.mutex.RUnlock()
 
-	stateFilePath := dm.GetStateFilePath()
 	data, err := json.MarshalIndent(stateFile, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal state: %w", err)
 	}
+
+	stateFilePath := dm.GetStateFilePath()
 
 	// Write to temp file first, then rename for atomic operation
 	tempPath := stateFilePath + ".tmp"
