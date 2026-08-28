@@ -1,42 +1,54 @@
-# golangci-lint configuration for goyt
+version: "2"
 run:
-  timeout: 5m
   tests: true
-
-linters-settings:
-  gofmt:
-    simplify: true
-  goimports:
-    local-prefixes: goyt
-  misspell:
-    locale: US
-  lll:
-    line-length: 120
-
 linters:
+  default: none
+  enable:
+    - dupl
+    - errcheck
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - modernize
+    - unconvert
+    - unused
+  settings:
+    lll:
+      line-length: 120
+    misspell:
+      locale: US
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - dupl
+          - errcheck
+          - gocyclo
+          - gosec
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
   enable:
     - gofmt
-    - goimports  
-    - govet
-    - errcheck
-    - staticcheck
-    - unused
-    - gosimple
-    - ineffassign
-    - typecheck
-    - gosec
-    - misspell
-    - lll
-    - unconvert
-    - dupl
-    - goconst
-    - gocyclo
-
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - gocyclo
-        - errcheck
-        - dupl
-        - gosec
+    - goimports
+  settings:
+    gofmt:
+      simplify: true
+    goimports:
+      local-prefixes:
+        - goyt
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

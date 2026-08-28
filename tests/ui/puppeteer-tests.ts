@@ -7,9 +7,10 @@ import puppeteer from 'puppeteer';
 
 const BASE_URL = process.env.TEST_BASE_URL || 'http://localhost:3000';
 
-const results = [];
+interface TestResult { name: string; passed: boolean; detail: string }
+const results: TestResult[] = [];
 
-function record(name, passed, detail = '') {
+function record(name: string, passed: boolean, detail = '') {
   results.push({ name, passed, detail });
   const mark = passed ? 'PASS' : 'FAIL';
   console.log(`${mark}  ${name}${detail ? ` (${detail})` : ''}`);
@@ -17,21 +18,22 @@ function record(name, passed, detail = '') {
 
 async function run() {
   const browser = await puppeteer.launch({
-    headless: 'new',
+    headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
   });
 
   const page = await browser.newPage();
-  const consoleErrors = [];
+  const consoleErrors: string[] = [];
   page.on('console', (msg) => {
     if (msg.type() === 'error') consoleErrors.push(msg.text());
   });
-  page.on('pageerror', (err) => consoleErrors.push(err.message));
+  page.on('pageerror', (err) => consoleErrors.push(err instanceof Error ? err.message : String(err)));
 
   try {
     // Page loads
     const response = await page.goto(BASE_URL, { waitUntil: 'networkidle0', timeout: 20000 });
-    record('page loads with HTTP 200', response.status() === 200, `status ${response.status()}`);
+    const status = response?.status();
+    record('page loads with HTTP 200', status === 200, `status ${status ?? 'no response'}`);
 
     const title = await page.title();
     record('page title set', title.includes('goyt'), title);
@@ -43,13 +45,13 @@ async function run() {
     }
 
     // Submit disabled until a URL validates
-    const initiallyDisabled = await page.$eval('#submit-button', (el) => el.disabled);
+    const initiallyDisabled = await page.$eval('#submit-button', (el) => (el as HTMLButtonElement).disabled);
     record('submit disabled before input', initiallyDisabled);
 
     // Invalid URL keeps submit disabled
     await page.type('#url-input', 'not-a-url');
     await new Promise((r) => setTimeout(r, 1500));
-    const stillDisabled = await page.$eval('#submit-button', (el) => el.disabled);
+    const stillDisabled = await page.$eval('#submit-button', (el) => (el as HTMLButtonElement).disabled);
     record('submit stays disabled for invalid input', stillDisabled);
 
     // Ledger sections exist
@@ -96,7 +98,7 @@ async function run() {
     // Media player dialog present and closed on load
     const dialogState = await page.evaluate(() => {
       const d = document.getElementById('media-player-modal');
-      return { exists: !!d, open: d ? d.open : true };
+      return { exists: !!d, open: d instanceof HTMLDialogElement ? d.open : true };
     });
     if (!dialogState.exists) throw new Error('media-player-modal dialog missing');
     if (dialogState.open) throw new Error('media-player-modal should be closed on load');
@@ -112,7 +114,7 @@ async function run() {
     const realErrors = consoleErrors.filter((e) => !e.includes('ERR_CONNECTION_REFUSED'));
     record('no console errors', realErrors.length === 0, realErrors.slice(0, 3).join(' | '));
   } catch (err) {
-    record('test run completed', false, err.message);
+    record('test run completed', false, err instanceof Error ? err.message : String(err));
   } finally {
     await browser.close();
   }

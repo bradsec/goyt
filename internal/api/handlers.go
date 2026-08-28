@@ -336,7 +336,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		WriteInternalError(w, "Failed to create session.")
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows whether this request uses HTTPS
 		Name:     sessionCookieName,
 		Value:    token,
 		Path:     "/",
@@ -350,12 +350,13 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 // Logout clears the session cookie.
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows whether this request uses HTTPS
 		Name:     sessionCookieName,
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
+		Secure:   isHTTPS(r),
 		MaxAge:   -1,
 	})
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
@@ -697,7 +698,7 @@ func (h *Handler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	file, err := os.Open(download.OutputPath)
+	file, err := os.Open(download.OutputPath) //nolint:gosec // pathWithinDir validates containment above
 	if err != nil {
 		if os.IsNotExist(err) {
 			WriteErrorResponse(w, http.StatusNotFound, "Not Found", "File no longer exists on disk", "NOT_FOUND")
@@ -757,7 +758,7 @@ func (h *Handler) StreamFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	file, err := os.Open(download.OutputPath)
+	file, err := os.Open(download.OutputPath) //nolint:gosec // pathWithinDir validates containment above
 	if err != nil {
 		if os.IsNotExist(err) {
 			WriteErrorResponse(w, http.StatusNotFound, "Not Found", "File no longer exists on disk", "NOT_FOUND")

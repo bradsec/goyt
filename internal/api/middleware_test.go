@@ -97,7 +97,7 @@ func TestRateLimiter(t *testing.T) {
 	wrapped := rateLimiter.Middleware(testHandler)
 
 	// First two requests should succeed
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		req := httptest.NewRequest("GET", "/test", nil)
 		req.RemoteAddr = "127.0.0.1:1234"
 		recorder := httptest.NewRecorder()

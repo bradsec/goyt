@@ -38,9 +38,9 @@ A self-hosted, cross-platform web interface for yt-dlp, written in Go. Download 
   formats and downloads fail with "Requested format is not available". Install
   [Deno](https://deno.com/) (used automatically when present) or Node.js 22+
   (goyt enables it with `--js-runtimes node`). Most other sites do not need this.
-- **Go 1.26+**: For building from source
-- **Node.js 18+**: For building CSS assets (separate from the runtime above;
-  Node 22+ also satisfies the YouTube JavaScript-runtime requirement)
+- **Go 1.27+**: For building from source
+- **Node.js 24+**: For compiling TypeScript and CSS assets; it also satisfies
+  the YouTube JavaScript-runtime requirement
 
 ### Installation
 
@@ -198,8 +198,11 @@ Sessions use an HttpOnly cookie with a 7-day expiry. For remote access, terminat
 Run the complete test suite:
 
 ```bash
-# Run all tests (Go + UI)
+# Type-check, run Go tests, then run UI tests against a local server
 npm test
+
+# Compile TypeScript and CSS assets
+npm run build-assets
 
 # Run only Go tests
 go test ./...
@@ -356,6 +359,7 @@ Logs go to stdout/stderr; enable `verbose_logging` in `config.json` for detail.
 ```
 goyt/
 ├── cmd/goyt/           # Main application entry point and CLI banner
+├── frontend/           # TypeScript browser and service-worker sources
 ├── internal/
 │   ├── api/            # HTTP handlers, middleware, and routing
 │   ├── config/         # Configuration management
@@ -364,16 +368,15 @@ goyt/
 │   ├── ui/             # Web UI templates and embedded assets
 │   └── utils/          # Shared utilities
 ├── tests/              # Test suites
-├── docs/               # Documentation
 └── scripts/            # Build and deployment scripts
 ```
 
 ### Frontend Assets
-The UI is styled with Tailwind CSS v4 (CSS-first config in `input.css`),
-compiled to `internal/ui/assets/css/main.css`. Static assets are embedded into
-the Go binary via `go:embed`, so rebuild the binary after changing CSS, JS, or
-images. Run `npm run build-css` (or `watch-css`) before `go build`; `npm run
-build` chains them in the correct order.
+The UI uses TypeScript and Tailwind CSS v4. `npm run build-assets` compiles the
+TypeScript sources under `frontend/src` and the CSS-first configuration in
+`input.css` into `internal/ui/assets`. Static assets are embedded into the Go
+binary via `go:embed`, so rebuild the binary after changing frontend sources or
+images. `npm run build` runs the asset build before compiling Go.
 
 ### Contributing
 1. Fork the repository

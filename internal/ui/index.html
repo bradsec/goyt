@@ -430,13 +430,5 @@
     </dialog>
 
     <script type="module" src="/assets/js/app.js"></script>
-
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/assets/sw.js').catch(() => {});
-        });
-      }
-    </script>
 </body>
 </html>

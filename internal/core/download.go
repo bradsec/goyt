@@ -335,13 +335,21 @@ func (d *Downloader) Download(
 	// Monitor progress. Keep a reference so a failed download can read the
 	// yt-dlp ERROR lines captured from stderr.
 	monitor := d.createProgressMonitor(download.ID, progressChan, statusCallback)
-	go monitor.start(stdout, stderr)
+	monitorCtx, stopMonitors := context.WithCancel(ctx)
+	var monitorWG sync.WaitGroup
+	defer func() {
+		stopMonitors()
+		monitorWG.Wait()
+	}()
+	monitorWG.Go(func() { monitor.start(stdout, stderr) })
 
 	// Start FFmpeg progress monitoring early to catch post-processing updates.
 	// The monitor exits with ctx when the download finishes or is canceled.
 	if download.ProgressFile != "" {
 		const fallbackDuration = 300.0 // used only until the real duration is parsed
-		go d.monitorFFmpegProgress(ctx, download.ProgressFile, progressChan, download.ID, fallbackDuration)
+		monitorWG.Go(func() {
+			d.monitorFFmpegProgress(monitorCtx, download.ProgressFile, progressChan, download.ID, fallbackDuration)
+		})
 	}
 
 	// Wait for completion
@@ -1105,14 +1113,13 @@ func (m *progressMonitor) initializeRegexPatterns() {
 func (m *progressMonitor) start(stdout, stderr io.ReadCloser) {
 	// Start stderr monitoring in a separate goroutine. The WaitGroup lets the
 	// caller block until stderr is fully drained before reading captured errors.
-	m.stderrWG.Add(1)
-	go func() {
-		defer m.stderrWG.Done()
+	m.stderrWG.Go(func() {
 		m.monitorStderr(stderr)
-	}()
+	})
 
 	// Monitor stdout for main progress
 	m.monitorStdout(stdout)
+	m.stderrWG.Wait()
 }
 
 // updateFFmpegProgress safely updates FFmpeg progress data
@@ -1514,8 +1521,8 @@ const goytProgressPrefix = "[goyt-dl]"
 // processDownloadProgress processes download progress from yt-dlp
 func (m *progressMonitor) processDownloadProgress(line string) {
 	trimmed := strings.TrimSpace(line)
-	if strings.HasPrefix(trimmed, goytProgressPrefix) {
-		m.handleTemplateProgress(strings.TrimSpace(strings.TrimPrefix(trimmed, goytProgressPrefix)))
+	if progress, found := strings.CutPrefix(trimmed, goytProgressPrefix); found {
+		m.handleTemplateProgress(strings.TrimSpace(progress))
 		return
 	}
 
@@ -1910,9 +1917,7 @@ func (d *Downloader) GetPlaylistItemsWithLimit(url string, limit int) ([]Playlis
 	}
 
 	var items []PlaylistItem
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-
-	for _, line := range lines {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(output)), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
@@ -1980,9 +1985,7 @@ func (d *Downloader) GetPlaylistItems(url string) ([]PlaylistItem, error) {
 	}
 
 	var items []PlaylistItem
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-
-	for _, line := range lines {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(output)), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
@@ -2056,8 +2059,7 @@ func (d *Downloader) monitorFFmpegProgress(
 		}
 
 		// Parse key=value format
-		lines := strings.Split(string(content), "\n")
-		for _, line := range lines {
+		for line := range strings.SplitSeq(string(content), "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" {
 				continue

@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -72,5 +73,49 @@ func TestExtractFFmpegBinaries(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dest, "readme.txt")); !os.IsNotExist(err) {
 		t.Errorf("non-bin file should not be extracted")
+	}
+}
+
+func TestExtractZipEntryRejectsOversizedEntry(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "ffmpeg.exe")
+	const original = "existing binary"
+	if err := os.WriteFile(dst, []byte(original), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	f := &zip.File{FileHeader: zip.FileHeader{
+		Name:               "build/bin/ffmpeg.exe",
+		UncompressedSize64: ffmpegMaxExtractBytes + 1,
+	}}
+	err := extractZipEntry(f, dst)
+	if err == nil {
+		t.Fatal("extractZipEntry succeeded for oversized entry")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum extracted size") {
+		t.Fatalf("extractZipEntry error = %q, want size limit error", err)
+	}
+
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != original {
+		t.Errorf("destination content = %q, want %q", got, original)
+	}
+	temps, err := filepath.Glob(filepath.Join(dir, ".ffmpeg.exe.tmp-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(temps) != 0 {
+		t.Errorf("temporary files left behind: %v", temps)
+	}
+}
+
+func TestExtractZipEntryRejectsStreamBeyondLimit(t *testing.T) {
+	var dst strings.Builder
+	err := copyZipStream(&dst, strings.NewReader("too large"), "ffmpeg.exe", 4)
+	if err == nil || !strings.Contains(err.Error(), "exceeds maximum extracted size") {
+		t.Fatalf("copyZipStream error = %v, want size limit error", err)
 	}
 }

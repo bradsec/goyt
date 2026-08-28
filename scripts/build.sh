@@ -5,6 +5,9 @@ set -e
 
 echo "Building goyt..."
 
+echo "Building frontend assets..."
+npm run build-assets
+
 # Clean previous builds
 echo "Cleaning previous builds..."
 rm -f goyt goyt.exe

@@ -23,29 +23,29 @@ class ProgressTestSuite {
 
   async setup() {
     console.log('Setting up progress test environment...');
-    
+
     await this.startTestServer();
-    
+
     this.browser = await puppeteer.launch({
       headless: false, // Keep visible to see progress bars
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
       slowMo: 100 // Slow down for better observation
     });
-    
+
     this.page = await this.browser.newPage();
     await this.page.setViewport({ width: 1920, height: 1080 });
-    
+
     // Enable console logging
     this.page.on('console', msg => console.log('PAGE:', msg.text()));
     this.page.on('pageerror', err => console.log('PAGE ERROR:', err.message));
-    
+
     console.log('Progress test environment ready');
   }
 
   async startTestServer() {
     return new Promise((resolve, reject) => {
       console.log('Starting test server...');
-      
+
       const testConfig = {
         "download_path": "./test-downloads",
         "max_concurrent_downloads": 1,
@@ -60,14 +60,14 @@ class ProgressTestSuite {
         "enable_hardware_acceleration": false,
         "optimize_for_low_power": true
       };
-      
+
       fs.writeFileSync('./test-config.json', JSON.stringify(testConfig, null, 2));
-      
+
       this.server = spawn('./goyt', ['-config', 'test-config.json'], {
         cwd: process.cwd(),
         stdio: 'pipe'
       });
-      
+
       // The readiness line is emitted by the standard logger, which writes to
       // stderr, so watch both streams and match the actual "listening on" text.
       let ready = false;
@@ -89,7 +89,7 @@ class ProgressTestSuite {
         console.log('SERVER ERROR:', output);
         watchForReady(output);
       });
-      
+
       this.server.on('error', reject);
       setTimeout(() => reject(new Error('Server start timeout')), 45000);
     });
@@ -97,14 +97,14 @@ class ProgressTestSuite {
 
   async teardown() {
     console.log('Cleaning up...');
-    
+
     if (this.page) await this.page.close();
     if (this.browser) await this.browser.close();
     if (this.server) {
       this.server.kill('SIGTERM');
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
-    
+
     try {
       fs.unlinkSync('./test-config.json');
       if (fs.existsSync('./test-downloads')) {
@@ -117,37 +117,37 @@ class ProgressTestSuite {
 
   async testProgressBarUpdates() {
     console.log('Testing progress bar updates...');
-    
+
     await this.page.goto(this.baseURL);
     await this.page.waitForSelector('#download-form', { timeout: 15000 });
-    
+
     // Test with a short video that should show progress
     const testURL = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'; // Rick Roll - short video
-    
+
     console.log('Entering test URL:', testURL);
     await this.page.type('#url-input', testURL);
-    
+
     // Set to 360p for faster download
     await this.page.select('#quality-select', '360p');
-    
+
     console.log('Starting download...');
     await this.page.click('#submit-button');
-    
-    // Wait for download to appear in the list  
+
+    // Wait for download to appear in the list
     await this.page.waitForSelector('.downloads-section .download-item, .download-entry, [data-download-id]', { timeout: 20000 });
-    
+
     console.log('Monitoring progress updates...');
-    
+
     const progressUpdates = [];
     let lastProgress = -1;
     let maxWaitTime = 120000; // 2 minutes max
     let startTime = Date.now();
-    
+
     // Monitor progress updates
     while (Date.now() - startTime < maxWaitTime) {
       try {
         const progressBars = await this.page.$$('.progress-bar, .progress-fill, [data-progress], .download-progress, .progress');
-        
+
         for (const progressBar of progressBars) {
           const progressText = await this.page.evaluate(el => {
             // Try different ways to get progress
@@ -156,7 +156,7 @@ class ProgressTestSuite {
             const width = style.width;
             const ariaValue = el.getAttribute('aria-valuenow');
             const dataProgress = el.getAttribute('data-progress');
-            
+
             return {
               text: text.trim(),
               width: width,
@@ -165,10 +165,10 @@ class ProgressTestSuite {
               className: el.className
             };
           }, progressBar);
-          
+
           // Extract percentage from various sources
           let currentProgress = null;
-          
+
           if (progressText.ariaValue) {
             currentProgress = parseFloat(progressText.ariaValue);
           } else if (progressText.dataProgress) {
@@ -180,7 +180,7 @@ class ProgressTestSuite {
             const match = progressText.width.match(/(\\d+(?:\\.\\d+)?)%/);
             if (match) currentProgress = parseFloat(match[1]);
           }
-          
+
           if (currentProgress !== null && currentProgress !== lastProgress) {
             console.log(`Progress update: ${currentProgress}%`);
             progressUpdates.push({
@@ -189,14 +189,14 @@ class ProgressTestSuite {
               details: progressText
             });
             lastProgress = currentProgress;
-            
+
             if (currentProgress >= 100) {
               console.log('Download completed!');
               return progressUpdates;
             }
           }
         }
-        
+
         // Check if download failed or completed
         const statusElements = await this.page.$$('.download-status, .status');
         for (const statusEl of statusElements) {
@@ -206,22 +206,22 @@ class ProgressTestSuite {
             return progressUpdates;
           }
         }
-        
+
         await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
-        
+
       } catch (error) {
         console.log('Progress monitoring error:', error.message);
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
     }
-    
+
     console.log('Progress monitoring timed out');
     return progressUpdates;
   }
 
   async testAPIProgressEndpoint() {
     console.log('Testing API progress endpoint...');
-    
+
     const response = await this.page.evaluate(async (baseURL) => {
       try {
         const res = await fetch(baseURL + '/api/downloads');
@@ -231,7 +231,7 @@ class ProgressTestSuite {
         return { error: error.message };
       }
     }, this.baseURL);
-    
+
     console.log('API Response:', JSON.stringify(response, null, 2));
     return response;
   }
@@ -239,21 +239,21 @@ class ProgressTestSuite {
   async runProgressTests() {
     try {
       await this.setup();
-      
+
       console.log('\\nStarting Progress Bar Test Suite');
       console.log('='.repeat(50));
-      
+
       // Test API endpoint first
       const apiResponse = await this.testAPIProgressEndpoint();
       console.log('API test completed');
-      
+
       // Test progress bar updates
       const progressUpdates = await this.testProgressBarUpdates();
-      
+
       console.log('\\nProgress Test Results:');
       console.log('='.repeat(30));
       console.log(`Total progress updates captured: ${progressUpdates.length}`);
-      
+
       if (progressUpdates.length > 0) {
         console.log('Progress updates are working!');
         console.log('Progress timeline:');
@@ -263,7 +263,7 @@ class ProgressTestSuite {
       } else {
         console.log('No progress updates detected - progress bar may be broken');
       }
-      
+
       // Generate report
       const report = {
         timestamp: new Date().toISOString(),
@@ -272,12 +272,12 @@ class ProgressTestSuite {
         apiResponse: apiResponse,
         testResult: progressUpdates.length > 0 ? 'PASS' : 'FAIL'
       };
-      
+
       fs.writeFileSync('./progress-test-report.json', JSON.stringify(report, null, 2));
       console.log('\\nDetailed report saved to progress-test-report.json');
-      
+
       return report.testResult === 'PASS';
-      
+
     } finally {
       await this.teardown();
     }

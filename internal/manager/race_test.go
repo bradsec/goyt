@@ -35,10 +35,9 @@ func TestAddDownloadReturnsSnapshot(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
-		wg.Add(2)
-		go func() { defer wg.Done(); _, _ = json.Marshal(got) }()
-		go func() { defer wg.Done(); dm.UpdateDownloadStatus(got.ID, core.StatusDownloading) }()
+	for range 50 {
+		wg.Go(func() { _, _ = json.Marshal(got) })
+		wg.Go(func() { dm.UpdateDownloadStatus(got.ID, core.StatusDownloading) })
 	}
 	wg.Wait()
 }

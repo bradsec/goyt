@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -61,7 +62,9 @@ func PanicRecoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Printf("PANIC recovered in %s %s: %v\n%s", r.Method, r.URL.Path, err, debug.Stack())
+				// %q escapes control characters in request-derived values.
+				log.Printf("PANIC recovered in %q %q: %q\n%s", //nolint:gosec // request values are quoted
+					r.Method, r.URL.Path, fmt.Sprint(err), debug.Stack())
 				WriteErrorResponse(w, http.StatusInternalServerError,
 					"Internal Server Error", "An unexpected error occurred. Please try again.", "INTERNAL_ERROR")
 			}
@@ -79,7 +82,7 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 		wrappedWriter := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 		next.ServeHTTP(wrappedWriter, r)
 
-		log.Printf("%s %s %d %v %s",
+		log.Printf("%q %q %d %v %q", //nolint:gosec // request values are quoted
 			r.Method,
 			r.URL.Path,
 			wrappedWriter.statusCode,

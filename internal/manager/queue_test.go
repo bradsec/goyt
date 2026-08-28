@@ -1,8 +1,10 @@
 package manager
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -369,9 +371,52 @@ func TestShutdown(t *testing.T) {
 
 	// Shutdown should not panic
 	dm.Shutdown()
+	dm.Shutdown()
 
-	// Give some time for cleanup
-	time.Sleep(100 * time.Millisecond)
+	if _, err := os.Stat(filepath.Join(tempDir, ".goyt_state.json")); err != nil {
+		t.Fatalf("final state was not persisted: %v", err)
+	}
+}
+
+func TestShutdownWaitsForTrackedWork(t *testing.T) {
+	dm := NewDownloadManager(
+		core.NewDownloader("yt-dlp", "ffmpeg", "", false, false),
+		0,
+		t.TempDir(),
+		&config.Config{},
+	)
+	var stopped atomic.Bool
+	dm.wg.Go(func() {
+		<-dm.ctx.Done()
+		stopped.Store(true)
+	})
+
+	dm.Shutdown()
+	if !stopped.Load() {
+		t.Fatal("Shutdown returned before tracked work stopped")
+	}
+}
+
+func TestUpdateConfigResizesConversionLimit(t *testing.T) {
+	dm := NewDownloadManager(
+		core.NewDownloader("yt-dlp", "ffmpeg", "", false, false),
+		1,
+		t.TempDir(),
+		&config.Config{MaxConcurrentDownloads: 1},
+	)
+	defer dm.Shutdown()
+	if !dm.acquireConversion(t.Context()) {
+		t.Fatal("failed to acquire initial conversion slot")
+	}
+
+	dm.UpdateConfig(&config.Config{MaxConcurrentDownloads: 2, DownloadPath: t.TempDir()})
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if !dm.acquireConversion(ctx) {
+		t.Fatal("updated conversion limit did not admit a second conversion")
+	}
+	dm.releaseConversion()
+	dm.releaseConversion()
 }
 
 // liveWorkers reads the active worker count under the manager lock.

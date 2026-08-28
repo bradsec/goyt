@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"goyt/internal/utils"
@@ -49,7 +50,7 @@ func resolveExecutable(name string) (string, error) {
 // and returns the first video and first audio codec names, lowercased. Missing
 // streams yield empty strings.
 func parseCodecOutput(out string) (video, audio string) {
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -208,10 +209,18 @@ func (d *Downloader) ConvertToH264AAC(
 
 	progressFile := filepath.Join(os.TempDir(), fmt.Sprintf("goyt_convert_%s.txt", download.ID))
 	download.ProgressFile = progressFile
-	defer os.Remove(progressFile)
+	monitorCtx, stopMonitor := context.WithCancel(ctx)
+	var monitorWG sync.WaitGroup
+	defer func() {
+		stopMonitor()
+		monitorWG.Wait()
+		_ = os.Remove(progressFile)
+	}()
 
 	duration := d.probeDurationSeconds(src)
-	go d.monitorFFmpegProgress(ctx, progressFile, progressChan, download.ID, duration)
+	monitorWG.Go(func() {
+		d.monitorFFmpegProgress(monitorCtx, progressFile, progressChan, download.ID, duration)
+	})
 
 	args := d.buildConvertArgs(src, tmpPath, progressFile)
 	// #nosec G204 - ffmpeg path is resolved and validated above; other args are internal.

@@ -36,7 +36,7 @@ func defaultCookiesPath(configPath string) string {
 
 // validateCookiesContent applies light validation to an uploaded cookies file:
 // size cap, valid UTF-8, and a shape that looks like a Netscape cookies file.
-// It is tolerant of format variants: a recognised header OR a single
+// It is tolerant of format variants: a recognized header OR a single
 // tab-delimited data line is enough.
 func validateCookiesContent(data []byte) error {
 	if len(data) > maxCookiesBytes {
@@ -45,7 +45,7 @@ func validateCookiesContent(data []byte) error {
 	if !utf8.Valid(data) {
 		return fmt.Errorf("cookies file is not valid UTF-8 text")
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "# Netscape HTTP Cookie File") ||
 			strings.HasPrefix(trimmed, "# HTTP Cookie File") {
@@ -85,8 +85,8 @@ func (h *Handler) GetCookies(w http.ResponseWriter, r *http.Request) {
 // UploadCookies validates and stores an uploaded Netscape cookies file, then
 // updates and persists config so downloads and URL validation use it at once.
 func (h *Handler) UploadCookies(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxCookiesBytes+4096) // room for multipart overhead
-	if err := r.ParseMultipartForm(maxCookiesBytes + 4096); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, maxCookiesBytes+4096)        // room for multipart overhead
+	if err := r.ParseMultipartForm(maxCookiesBytes + 4096); err != nil { //nolint:gosec // body is bounded above
 		WriteValidationError(w, "Upload too large or malformed.")
 		return
 	}

@@ -22,7 +22,10 @@ const StateVersion = "1.0"
 
 // GetStateFilePath returns the path where the state file should be stored
 func (dm *DownloadManager) GetStateFilePath() string {
-	return filepath.Join(dm.outputDir, ".goyt_state.json")
+	dm.mutex.RLock()
+	outputDir := dm.outputDir
+	dm.mutex.RUnlock()
+	return filepath.Join(outputDir, ".goyt_state.json")
 }
 
 // SaveState persists the current download manager state to disk
@@ -161,7 +164,7 @@ func (dm *DownloadManager) validateRestoredDownload(download *core.Download) boo
 
 // StartPeriodicStateSave begins automatically saving state at regular intervals
 func (dm *DownloadManager) StartPeriodicStateSave() {
-	go func() {
+	dm.wg.Go(func() {
 		ticker := time.NewTicker(30 * time.Second) // Save every 30 seconds
 		defer ticker.Stop()
 
@@ -176,7 +179,7 @@ func (dm *DownloadManager) StartPeriodicStateSave() {
 				}
 			}
 		}
-	}()
+	})
 }
 
 // CleanupStateFile removes the state file (useful for clean shutdown)

@@ -215,19 +215,19 @@ func TestMethodNotAllowed(t *testing.T) {
 
 func TestMediaContentType(t *testing.T) {
 	cases := map[string]string{
-		"clip.mp4":  "video/mp4",
-		"clip.MP4":  "video/mp4",
-		"clip.webm": "video/webm",
-		"song.mp3":  "audio/mpeg",
-		"song.m4a":  "audio/mp4",
-		"voice.ogg": "audio/ogg",
-		"clip.m4v":  "video/mp4",
-		"clip.mkv":  "video/x-matroska",
-		"clip.mov":  "video/quicktime",
+		"clip.mp4":   "video/mp4",
+		"clip.MP4":   "video/mp4",
+		"clip.webm":  "video/webm",
+		"song.mp3":   "audio/mpeg",
+		"song.m4a":   "audio/mp4",
+		"voice.ogg":  "audio/ogg",
+		"clip.m4v":   "video/mp4",
+		"clip.mkv":   "video/x-matroska",
+		"clip.mov":   "video/quicktime",
 		"voice.opus": "audio/ogg",
-		"voice.wav": "audio/wav",
-		"clip.ogv":  "video/ogg",
-		"weird.xyz": "application/octet-stream",
+		"voice.wav":  "audio/wav",
+		"clip.ogv":   "video/ogg",
+		"weird.xyz":  "application/octet-stream",
 	}
 	for name, want := range cases {
 		if got := mediaContentType(name); got != want {

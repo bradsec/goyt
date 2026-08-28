@@ -13,13 +13,13 @@ import (
 func SanitizeFilename(filename string) string {
 	// Remove file extension temporarily (only if it's a real extension)
 	ext := ""
-	if lastDot := strings.LastIndex(filename, "."); lastDot != -1 {
-		potentialExt := filename[lastDot:]
+	if name, potentialExt, found := strings.CutLast(filename, "."); found {
+		potentialExt = "." + potentialExt
 		// Only treat it as an extension if it's a common file extension
 		// and doesn't contain spaces (real extensions don't have spaces)
 		if !strings.Contains(potentialExt, " ") && len(potentialExt) <= 6 {
 			ext = potentialExt
-			filename = filename[:lastDot]
+			filename = name
 		}
 	}
 

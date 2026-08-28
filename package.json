@@ -1,24 +1,33 @@
 {
   "name": "goyt",
-  "version": "2026.06.17",
+  "version": "2026.08.29",
   "type": "module",
   "description": "Self-hosted web interface for downloading video and audio with yt-dlp",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "build-fonts": "mkdir -p ./internal/ui/assets/fonts && cp ./node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2 ./node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-500-normal.woff2 ./node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-700-normal.woff2 ./internal/ui/assets/fonts/",
     "build-css": "npm run build-fonts && tailwindcss -i ./input.css -o ./internal/ui/assets/css/main.css --minify",
+    "build-js": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
+    "build-assets": "npm run build-css && npm run build-js",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.worker.json --noEmit && tsc -p tsconfig.tests.json",
     "watch-css": "tailwindcss -i ./input.css -o ./internal/ui/assets/css/main.css --watch",
-    "build": "npm run build-css && go build -ldflags=\"-s -w -X goyt/internal/api.Version=$npm_package_version\" -o goyt ./cmd/goyt",
-    "build-production": "npm run build-css && go build -ldflags=\"-s -w -X goyt/internal/api.Version=$npm_package_version\" -o goyt ./cmd/goyt",
-    "test-ui": "node tests/ui/puppeteer-tests.js",
-    "test-progress": "node tests/ui/progress-test.js",
-    "test": "go test ./... && npm run test-ui"
+    "build": "npm run build-assets && go build -ldflags=\"-s -w -X goyt/internal/api.Version=$npm_package_version\" -o goyt ./cmd/goyt",
+    "build-production": "npm run build",
+    "test-ui": "tsx tests/ui/puppeteer-tests.ts",
+    "test-progress": "tsx tests/ui/progress-test.ts",
+    "test": "npm run typecheck && go test ./... && npm run test-ui"
   },
   "devDependencies": {
-    "@tailwindcss/cli": "^4.3.1",
-    "puppeteer": "^25.1.0",
-    "tailwindcss": "^4.3.1"
+    "@tailwindcss/cli": "^4.3.3",
+    "@types/node": "^26.4.0",
+    "puppeteer": "^25.9.0",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@fontsource/jetbrains-mono": "^5.2.8"
+    "@fontsource/jetbrains-mono": "^5.3.0"
   }
 }

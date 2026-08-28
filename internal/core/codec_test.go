@@ -36,9 +36,9 @@ func TestBuildConvertArgs(t *testing.T) {
 
 func TestParseCodecOutput(t *testing.T) {
 	cases := []struct {
-		name           string
-		in             string
-		wantV, wantA   string
+		name         string
+		in           string
+		wantV, wantA string
 	}{
 		{"type first", "video,h264\naudio,aac\n", "h264", "aac"},
 		{"name first (real ffprobe)", "h264,video\naac,audio\n", "h264", "aac"},

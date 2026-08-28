@@ -24,10 +24,10 @@ var (
 )
 
 type LogEntry struct {
-	Timestamp string                 `json:"timestamp"`
-	Level     string                 `json:"level"`
-	Message   string                 `json:"message"`
-	Context   map[string]interface{} `json:"context,omitempty"`
+	Timestamp string         `json:"timestamp"`
+	Level     string         `json:"level"`
+	Message   string         `json:"message"`
+	Context   map[string]any `json:"context,omitempty"`
 }
 
 // SetVerboseLogging sets the global verbose logging flag
@@ -43,7 +43,7 @@ func SetLogLevel(level LogLevel) {
 	currentLevel = level
 }
 
-func logWithLevel(level LogLevel, message string, context map[string]interface{}) {
+func logWithLevel(level LogLevel, message string, context map[string]any) {
 	if level < currentLevel {
 		return
 	}
@@ -71,8 +71,8 @@ func logWithLevel(level LogLevel, message string, context map[string]interface{}
 }
 
 // LogDebug logs debug messages
-func LogDebug(message string, context ...map[string]interface{}) {
-	var ctx map[string]interface{}
+func LogDebug(message string, context ...map[string]any) {
+	var ctx map[string]any
 	if len(context) > 0 {
 		ctx = context[0]
 	}
@@ -80,32 +80,32 @@ func LogDebug(message string, context ...map[string]interface{}) {
 }
 
 // LogDebugf logs formatted debug messages
-func LogDebugf(format string, args ...interface{}) {
+func LogDebugf(format string, args ...any) {
 	message := fmt.Sprintf(format, args...)
 	logWithLevel(DEBUG, message, nil)
 }
 
 // LogInfo logs informational messages
-func LogInfo(format string, args ...interface{}) {
+func LogInfo(format string, args ...any) {
 	message := fmt.Sprintf(format, args...)
 	logWithLevel(INFO, message, nil)
 }
 
 // LogInfoWithContext logs informational messages with context
-func LogInfoWithContext(message string, context map[string]interface{}) {
+func LogInfoWithContext(message string, context map[string]any) {
 	logWithLevel(INFO, message, context)
 }
 
 // LogError logs error messages (always shown)
-func LogError(format string, args ...interface{}) {
+func LogError(format string, args ...any) {
 	message := fmt.Sprintf(format, args...)
 	logWithLevel(ERROR, message, nil)
 }
 
 // LogErrorWithContext logs error messages with context
-func LogErrorWithContext(message string, err error, context map[string]interface{}) {
+func LogErrorWithContext(message string, err error, context map[string]any) {
 	if context == nil {
-		context = make(map[string]interface{})
+		context = make(map[string]any)
 	}
 	if err != nil {
 		context["error"] = err.Error()
@@ -114,13 +114,13 @@ func LogErrorWithContext(message string, err error, context map[string]interface
 }
 
 // LogWarning logs warning messages
-func LogWarning(format string, args ...interface{}) {
+func LogWarning(format string, args ...any) {
 	message := fmt.Sprintf(format, args...)
 	logWithLevel(WARN, message, nil)
 }
 
 // LogSuccess logs success messages
-func LogSuccess(format string, args ...interface{}) {
+func LogSuccess(format string, args ...any) {
 	message := fmt.Sprintf(format, args...)
-	logWithLevel(INFO, message, map[string]interface{}{"status": "success"})
+	logWithLevel(INFO, message, map[string]any{"status": "success"})
 }

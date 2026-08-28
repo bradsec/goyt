@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Build stage: compile CSS assets and the Go binary.
-FROM golang:1.26-alpine AS builder
+FROM golang:1.27.0-alpine AS builder
 RUN apk add --no-cache nodejs npm
 WORKDIR /app
 
@@ -19,14 +19,14 @@ COPY . .
 # `docker build` matches the npm build; CI passes the git tag via
 # `--build-arg VERSION=$TAG` to keep the image in sync with releases.
 ARG VERSION
-RUN npm run build-css \
+RUN npm run build-assets \
     && go build -ldflags="-s -w -X goyt/internal/api.Version=${VERSION:-$(node -p "require('./package.json').version")}" \
         -o goyt ./cmd/goyt
 
 # Runtime stage.
 # Alpine 3.22 ships deno 2.x; older releases (3.20) only have deno 1.43, which
 # yt-dlp rejects as unsupported for solving YouTube's nsig challenge.
-FROM alpine:3.22
+FROM alpine:3.24
 # ffmpeg: media muxing/conversion. python3: required by the yt-dlp zipapp the
 # updater downloads. deno: JavaScript runtime yt-dlp uses to solve YouTube's
 # nsig challenge (without it YouTube returns only image formats and downloads

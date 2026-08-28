@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"goyt/internal/utils"
@@ -144,13 +145,7 @@ func IsCommandAvailable(command string) bool {
 	// Validate command before executing (fixes G204)
 	// Allow common system commands by name, validate full paths
 	commonCommands := []string{"ffmpeg", "ffprobe", "yt-dlp"}
-	isCommon := false
-	for _, common := range commonCommands {
-		if command == common {
-			isCommon = true
-			break
-		}
-	}
+	isCommon := slices.Contains(commonCommands, command)
 
 	command = resolveBinPath(command)
 	if !isCommon && utils.ValidateExecutablePath(command) != nil {

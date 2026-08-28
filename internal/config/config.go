@@ -112,7 +112,7 @@ func Load(configPath string) (*Config, error) {
 }
 
 func (c *Config) Save(configPath string) error {
-	data, err := json.MarshalIndent(c, "", "  ")
+	data, err := json.MarshalIndent(c, "", "  ") //nolint:gosec // session secret must persist in the protected config
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}

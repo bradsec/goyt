@@ -184,6 +184,17 @@ func extractFFmpegBinaries(zipPath, destDir string) (string, error) {
 
 // extractZipEntry writes a single zip entry to dst via a temp file and rename.
 func extractZipEntry(f *zip.File, dst string) error {
+	return extractZipEntryWithLimit(f, dst, ffmpegMaxExtractBytes)
+}
+
+func extractZipEntryWithLimit(f *zip.File, dst string, maxBytes int64) error {
+	if maxBytes < 0 {
+		return fmt.Errorf("maximum extracted size cannot be negative")
+	}
+	if f.UncompressedSize64 > uint64(maxBytes) {
+		return fmt.Errorf("zip entry %q exceeds maximum extracted size of %d bytes", f.Name, maxBytes)
+	}
+
 	rc, err := f.Open()
 	if err != nil {
 		return err
@@ -196,7 +207,7 @@ func extractZipEntry(f *zip.File, dst string) error {
 	}
 	tmpName := tmp.Name()
 
-	if _, err := io.Copy(tmp, io.LimitReader(rc, ffmpegMaxExtractBytes)); err != nil {
+	if err := copyZipStream(tmp, rc, f.Name, maxBytes); err != nil {
 		tmp.Close()
 		os.Remove(tmpName)
 		return err
@@ -208,6 +219,17 @@ func extractZipEntry(f *zip.File, dst string) error {
 	if err := os.Rename(tmpName, dst); err != nil {
 		os.Remove(tmpName)
 		return err
+	}
+	return nil
+}
+
+func copyZipStream(dst io.Writer, src io.Reader, name string, maxBytes int64) error {
+	written, err := io.Copy(dst, io.LimitReader(src, maxBytes+1))
+	if err != nil {
+		return err
+	}
+	if written > maxBytes {
+		return fmt.Errorf("zip entry %q exceeds maximum extracted size of %d bytes", name, maxBytes)
 	}
 	return nil
 }

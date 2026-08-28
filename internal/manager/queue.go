@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -30,24 +30,28 @@ var (
 )
 
 type DownloadManager struct {
-	downloader       *core.Downloader
-	downloads        map[string]*core.Download
-	queue            chan *core.Download
-	maxConcurrent    int
-	activeWorkers    int             // Track active workers
-	workerCtx        context.Context // Separate context for workers
-	workerCancel     context.CancelFunc
-	workerQuit       chan struct{} // Signals a single worker to stop after its current job
-	progressChannels map[string]chan core.DownloadProgress
-	cancelFuncs      map[string]context.CancelFunc
-	pausedDownloads  map[string]*core.Download
-	processingUrls   map[string]bool // Track URLs currently being processed
-	convertSem       chan struct{}   // bounds concurrent convert jobs
-	mutex            sync.RWMutex
-	ctx              context.Context
-	cancel           context.CancelFunc
-	outputDir        string
-	config           *config.Config
+	downloader        *core.Downloader
+	downloads         map[string]*core.Download
+	queue             chan *core.Download
+	maxConcurrent     int
+	activeWorkers     int             // Track active workers
+	workerCtx         context.Context // Separate context for workers
+	workerCancel      context.CancelFunc
+	workerQuit        chan struct{} // Signals a single worker to stop after its current job
+	progressChannels  map[string]chan core.DownloadProgress
+	cancelFuncs       map[string]context.CancelFunc
+	pausedDownloads   map[string]*core.Download
+	processingUrls    map[string]bool // Track URLs currently being processed
+	activeConversions int
+	conversionChanged chan struct{}
+	mutex             sync.RWMutex
+	wg                sync.WaitGroup
+	shutdownOnce      sync.Once
+	shuttingDown      bool
+	ctx               context.Context
+	cancel            context.CancelFunc
+	outputDir         string
+	config            *config.Config
 }
 
 func NewDownloadManager(
@@ -56,27 +60,29 @@ func NewDownloadManager(
 	outputDir string,
 	cfg *config.Config,
 ) *DownloadManager {
+	configSnapshot := *cfg
+	cfg = &configSnapshot
 	ctx, cancel := context.WithCancel(context.Background())
 	workerCtx, workerCancel := context.WithCancel(ctx)
 
 	dm := &DownloadManager{
-		downloader:       downloader,
-		downloads:        make(map[string]*core.Download),
-		queue:            make(chan *core.Download, 100),
-		maxConcurrent:    maxConcurrent,
-		activeWorkers:    0,
-		workerCtx:        workerCtx,
-		workerCancel:     workerCancel,
-		workerQuit:       make(chan struct{}),
-		progressChannels: make(map[string]chan core.DownloadProgress),
-		cancelFuncs:      make(map[string]context.CancelFunc),
-		pausedDownloads:  make(map[string]*core.Download),
-		processingUrls:   make(map[string]bool),
-		convertSem:       make(chan struct{}, maxConcurrent),
-		ctx:              ctx,
-		cancel:           cancel,
-		outputDir:        outputDir,
-		config:           cfg,
+		downloader:        downloader,
+		downloads:         make(map[string]*core.Download),
+		queue:             make(chan *core.Download, 100),
+		maxConcurrent:     maxConcurrent,
+		activeWorkers:     0,
+		workerCtx:         workerCtx,
+		workerCancel:      workerCancel,
+		workerQuit:        make(chan struct{}),
+		progressChannels:  make(map[string]chan core.DownloadProgress),
+		cancelFuncs:       make(map[string]context.CancelFunc),
+		pausedDownloads:   make(map[string]*core.Download),
+		processingUrls:    make(map[string]bool),
+		conversionChanged: make(chan struct{}),
+		ctx:               ctx,
+		cancel:            cancel,
+		outputDir:         outputDir,
+		config:            cfg,
 	}
 
 	// Start workers
@@ -88,7 +94,7 @@ func NewDownloadManager(
 
 	// Start cleanup worker if auto-expiry is enabled
 	if cfg.CompletedFileExpiryHours > 0 {
-		go dm.cleanupWorker()
+		dm.wg.Go(dm.cleanupWorker)
 	}
 
 	// Start periodic state saving
@@ -98,8 +104,11 @@ func NewDownloadManager(
 }
 
 func (dm *DownloadManager) AddDownload(req core.DownloadRequest) (*core.Download, error) {
+	dm.mutex.RLock()
+	downloader := dm.downloader
+	dm.mutex.RUnlock()
 	// Check if URL is a playlist - don't auto-process playlists
-	if dm.downloader.IsPlaylistURL(req.URL) {
+	if downloader.IsPlaylistURL(req.URL) {
 		return nil, ErrPlaylistURL
 	}
 
@@ -195,7 +204,10 @@ func (dm *DownloadManager) AddPlaylistDownload(req core.DownloadRequest) (*core.
 	log.Printf("[MANAGER] Processing playlist URL: %s", req.URL)
 
 	// Get playlist items
-	items, err := dm.downloader.GetPlaylistItems(req.URL)
+	dm.mutex.RLock()
+	downloader := dm.downloader
+	dm.mutex.RUnlock()
+	items, err := downloader.GetPlaylistItems(req.URL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get playlist items: %w", err)
 	}
@@ -289,8 +301,8 @@ func (dm *DownloadManager) GetAllDownloads() []*core.Download {
 		snapshot := *download
 		downloads = append(downloads, &snapshot)
 	}
-	sort.Slice(downloads, func(i, j int) bool {
-		return downloads[i].CreatedAt.Before(downloads[j].CreatedAt)
+	slices.SortFunc(downloads, func(a, b *core.Download) int {
+		return a.CreatedAt.Compare(b.CreatedAt)
 	})
 
 	return downloads
@@ -433,7 +445,7 @@ func (dm *DownloadManager) RemoveDownload(id string) error {
 	if download.Status == core.StatusDownloading ||
 		download.Status == core.StatusPostProcessing ||
 		download.Status == core.StatusConverting {
-		// Cancel the download, post-processing, or convert first. Cancelling a
+		// Cancel the download, post-processing, or convert first. Canceling a
 		// convert makes ffmpeg exit, and ConvertToH264AAC removes its temp file.
 		if cancelFunc, exists := dm.cancelFuncs[id]; exists {
 			log.Printf("[MANAGER] Canceling running process for download %s", id)
@@ -837,41 +849,47 @@ func (dm *DownloadManager) worker() {
 
 // startWorkers starts the specified number of worker goroutines
 func (dm *DownloadManager) startWorkers(count int) {
-	for i := 0; i < count; i++ {
-		go dm.worker()
+	for range count {
+		dm.wg.Go(dm.worker)
 	}
 }
 
 // UpdateConfig updates the download manager configuration and adjusts workers accordingly
 func (dm *DownloadManager) UpdateConfig(newConfig *config.Config) {
-	dm.mutex.Lock()
-	defer dm.mutex.Unlock()
-
-	oldMaxConcurrent := dm.maxConcurrent
-	dm.config = newConfig
-	dm.maxConcurrent = newConfig.MaxConcurrentDownloads
-	dm.outputDir = newConfig.DownloadPath
-
-	// Create a new downloader with updated paths
-	dm.downloader = core.NewDownloader(
+	configSnapshot := *newConfig
+	newConfig = &configSnapshot
+	newDownloader := core.NewDownloader(
 		newConfig.YtDlpPath,
 		newConfig.FfmpegPath,
 		newConfig.CookiesFilePath,
 		newConfig.EnableHardwareAccel,
 		newConfig.OptimizeForLowPower)
-	dm.downloader.SetTimeouts(
+	newDownloader.SetTimeouts(
 		time.Duration(newConfig.DownloadStartTimeoutSeconds)*time.Second,
 		time.Duration(newConfig.PlaylistLoadTimeoutSeconds)*time.Second)
 
+	dm.mutex.Lock()
+	if dm.shuttingDown {
+		dm.mutex.Unlock()
+		return
+	}
+	oldMaxConcurrent := dm.maxConcurrent
+	dm.config = newConfig
+	dm.maxConcurrent = newConfig.MaxConcurrentDownloads
+	dm.outputDir = newConfig.DownloadPath
+	dm.downloader = newDownloader
+	close(dm.conversionChanged)
+	dm.conversionChanged = make(chan struct{})
+	if oldMaxConcurrent != newConfig.MaxConcurrentDownloads {
+		dm.adjustWorkers(oldMaxConcurrent, newConfig.MaxConcurrentDownloads)
+	}
+	dm.mutex.Unlock()
+
 	log.Printf("[MANAGER] Config updated: MaxConcurrent %d -> %d, OutputDir -> %s",
-		oldMaxConcurrent, dm.maxConcurrent, dm.outputDir)
+		oldMaxConcurrent, newConfig.MaxConcurrentDownloads, newConfig.DownloadPath)
 	log.Printf("[MANAGER] Downloader updated with new paths: yt-dlp=%s, ffmpeg=%s",
 		newConfig.YtDlpPath, newConfig.FfmpegPath)
 
-	// Adjust workers if needed
-	if oldMaxConcurrent != dm.maxConcurrent {
-		dm.adjustWorkers(oldMaxConcurrent, dm.maxConcurrent)
-	}
 }
 
 // adjustWorkers adjusts the number of worker goroutines
@@ -882,11 +900,11 @@ func (dm *DownloadManager) adjustWorkers(oldCount, newCount int) {
 		log.Printf("[MANAGER] Starting %d additional workers", additional)
 		dm.startWorkers(additional)
 	} else if newCount < oldCount {
-		// Reduce workers by signalling exactly (oldCount-newCount) workers to
+		// Reduce workers by signaling exactly (oldCount-newCount) workers to
 		// stop after they finish any in-flight job. The previous approach
-		// cancelled all workers and started newCount fresh ones, so the still
+		// canceled all workers and started newCount fresh ones, so the still
 		// finishing old workers plus the new ones briefly exceeded the limit
-		// (finding Q-2). Signalling individual workers keeps the live count at
+		// (finding Q-2). Signaling individual workers keeps the live count at
 		// or below oldCount and converges to newCount with no new workers.
 		toStop := oldCount - newCount
 		log.Printf("[MANAGER] Reducing workers from %d to %d", oldCount, newCount)
@@ -895,15 +913,15 @@ func (dm *DownloadManager) adjustWorkers(oldCount, newCount int) {
 		// select, and adjustWorkers runs under dm.mutex which those workers
 		// also need, so a synchronous send here would deadlock. Abort the sends
 		// if the manager shuts down to avoid leaking this goroutine.
-		go func() {
-			for i := 0; i < toStop; i++ {
+		dm.wg.Go(func() {
+			for range toStop {
 				select {
 				case dm.workerQuit <- struct{}{}:
 				case <-dm.ctx.Done():
 					return
 				}
 			}
-		}()
+		})
 	}
 }
 
@@ -914,6 +932,8 @@ func (dm *DownloadManager) processDownload(download *core.Download) {
 	// Update status to downloading immediately
 	download.Status = core.StatusDownloading
 	progressChan := dm.progressChannels[download.ID]
+	downloader := dm.downloader
+	outputDir := dm.outputDir
 	dm.mutex.Unlock()
 
 	req := core.DownloadRequest{
@@ -921,7 +941,7 @@ func (dm *DownloadManager) processDownload(download *core.Download) {
 		Type:      download.Type,
 		Quality:   download.Quality,
 		Format:    download.Format,
-		OutputDir: dm.outputDir, // Use the configured output directory
+		OutputDir: outputDir,
 	}
 
 	log.Printf("[MANAGER] Download %s: Creating context and starting download", download.ID)
@@ -944,7 +964,8 @@ func (dm *DownloadManager) processDownload(download *core.Download) {
 	}()
 
 	// Start progress monitoring goroutine
-	go func() {
+	var progressWG sync.WaitGroup
+	progressWG.Go(func() {
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("[MANAGER] Download %s: Progress monitoring goroutine recovered from panic: %v", download.ID, r)
@@ -956,12 +977,21 @@ func (dm *DownloadManager) processDownload(download *core.Download) {
 			dm.mutex.Unlock()
 		}
 		log.Printf("[MANAGER] Download %s: Progress monitoring stopped", download.ID)
-	}()
+	})
 
 	// Start download
 	log.Printf("[MANAGER] Download %s: Calling downloader.Download", download.ID)
-	completedDownload, err := dm.downloader.Download(
+	completedDownload, err := downloader.Download(
 		ctx, req, progressChan, dm.UpdateDownloadTitle, dm.UpdateDownloadStatus, download.ID)
+
+	var videoCodec, audioCodec string
+	if err == nil && completedDownload.Type == core.VideoDownload && completedDownload.OutputPath != "" {
+		if v, a, probeErr := downloader.ProbeCodecs(completedDownload.OutputPath); probeErr != nil {
+			log.Printf("[MANAGER] Download %s: codec probe failed: %v", download.ID, probeErr)
+		} else {
+			videoCodec, audioCodec = v, a
+		}
+	}
 
 	dm.mutex.Lock()
 	if ctx.Err() == context.Canceled {
@@ -984,14 +1014,8 @@ func (dm *DownloadManager) processDownload(download *core.Download) {
 		download.FileSize = completedDownload.FileSize
 		download.CompletedAt = completedDownload.CompletedAt
 
-		if download.Type == core.VideoDownload && download.OutputPath != "" {
-			if v, a, perr := dm.downloader.ProbeCodecs(download.OutputPath); perr != nil {
-				log.Printf("[MANAGER] Download %s: codec probe failed: %v", download.ID, perr)
-			} else {
-				download.VideoCodec = v
-				download.AudioCodec = a
-			}
-		}
+		download.VideoCodec = videoCodec
+		download.AudioCodec = audioCodec
 
 		log.Printf("[MANAGER] Download %s: Final status after completion: %s", download.ID, download.Status)
 	}
@@ -1011,6 +1035,7 @@ func (dm *DownloadManager) processDownload(download *core.Download) {
 		delete(dm.progressChannels, download.ID)
 	}
 	dm.mutex.Unlock()
+	progressWG.Wait()
 }
 
 // videoIsCompatible reports whether a download is already H.264 + AAC.
@@ -1068,6 +1093,10 @@ func (dm *DownloadManager) maybeAutoReencode(id string) {
 // the existing CancelDownload path (it registers under cancelFuncs[id]).
 func (dm *DownloadManager) ConvertDownload(id string) error {
 	dm.mutex.Lock()
+	if dm.shuttingDown {
+		dm.mutex.Unlock()
+		return fmt.Errorf("download manager is shutting down")
+	}
 	download, exists := dm.downloads[id]
 	if !exists {
 		dm.mutex.Unlock()
@@ -1100,7 +1129,7 @@ func (dm *DownloadManager) ConvertDownload(id string) error {
 	download.Progress = core.DownloadProgress{}
 	dm.mutex.Unlock()
 
-	go dm.runConvert(ctx, cancel, id, download, prevStatus, progressChan)
+	dm.wg.Go(func() { dm.runConvert(ctx, cancel, id, download, prevStatus, progressChan) })
 	return nil
 }
 
@@ -1114,6 +1143,7 @@ func (dm *DownloadManager) runConvert(
 	prevStatus core.DownloadStatus,
 	progressChan chan core.DownloadProgress,
 ) {
+	var progressWG sync.WaitGroup
 	defer func() {
 		// Cancel the context first so the progress monitor stops sending before
 		// the channel is closed, then close the channel.
@@ -1128,27 +1158,56 @@ func (dm *DownloadManager) runConvert(
 			delete(dm.progressChannels, id)
 		}
 		dm.mutex.Unlock()
+		progressWG.Wait()
 	}()
 
-	go func() {
+	progressWG.Go(func() {
 		defer func() { _ = recover() }()
 		for p := range progressChan {
 			dm.mutex.Lock()
 			download.Progress = p
 			dm.mutex.Unlock()
 		}
-	}()
+	})
 
-	select {
-	case dm.convertSem <- struct{}{}:
-		defer func() { <-dm.convertSem }()
-	case <-ctx.Done():
+	if !dm.acquireConversion(ctx) {
 		dm.finishConvert(id, prevStatus, "", context.Canceled)
 		return
 	}
+	defer dm.releaseConversion()
 
-	newPath, err := dm.downloader.ConvertToH264AAC(ctx, download, progressChan)
+	dm.mutex.RLock()
+	downloader := dm.downloader
+	dm.mutex.RUnlock()
+	newPath, err := downloader.ConvertToH264AAC(ctx, download, progressChan)
 	dm.finishConvert(id, prevStatus, newPath, err)
+}
+
+func (dm *DownloadManager) acquireConversion(ctx context.Context) bool {
+	for {
+		dm.mutex.Lock()
+		if dm.activeConversions < dm.maxConcurrent {
+			dm.activeConversions++
+			dm.mutex.Unlock()
+			return true
+		}
+		changed := dm.conversionChanged
+		dm.mutex.Unlock()
+
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return false
+		}
+	}
+}
+
+func (dm *DownloadManager) releaseConversion() {
+	dm.mutex.Lock()
+	dm.activeConversions--
+	close(dm.conversionChanged)
+	dm.conversionChanged = make(chan struct{})
+	dm.mutex.Unlock()
 }
 
 // finishConvert applies the terminal state of a convert job and saves state.
@@ -1159,7 +1218,10 @@ func (dm *DownloadManager) finishConvert(id string, prevStatus core.DownloadStat
 	var newV, newA string
 	var probed bool
 	if err == nil && newPath != "" {
-		if v, a, perr := dm.downloader.ProbeCodecs(newPath); perr == nil {
+		dm.mutex.RLock()
+		downloader := dm.downloader
+		dm.mutex.RUnlock()
+		if v, a, perr := downloader.ProbeCodecs(newPath); perr == nil {
 			newV, newA, probed = v, a, true
 		}
 	}
@@ -1250,12 +1312,11 @@ func (dm *DownloadManager) cleanupWorker() {
 }
 
 func (dm *DownloadManager) cleanupExpiredDownloads() {
-	if dm.config.CompletedFileExpiryHours <= 0 {
-		return // Auto-expiry disabled
-	}
-
 	dm.mutex.Lock()
 	defer dm.mutex.Unlock()
+	if dm.config.CompletedFileExpiryHours <= 0 {
+		return
+	}
 
 	expiryDuration := time.Duration(dm.config.CompletedFileExpiryHours) * time.Hour
 	now := time.Now()
@@ -1389,20 +1450,17 @@ func (dm *DownloadManager) extractTitleFromPath(filePath string) string {
 }
 
 func (dm *DownloadManager) Shutdown() {
-	log.Printf("[MANAGER] Shutting down download manager...")
-
-	// Save final state
-	if err := dm.SaveState(); err != nil {
-		log.Printf("[MANAGER] Failed to save final state: %v", err)
-	}
-
-	// Cancel worker context first to stop workers gracefully
-	dm.workerCancel()
-
-	// Then cancel main context. The queue channel is intentionally not
-	// closed: workers select on workerCtx.Done() and a closed channel would
-	// deliver nil downloads to any worker still in its receive case.
-	dm.cancel()
-
-	log.Printf("[MANAGER] Download manager shutdown complete")
+	dm.shutdownOnce.Do(func() {
+		log.Printf("[MANAGER] Shutting down download manager...")
+		dm.mutex.Lock()
+		dm.shuttingDown = true
+		dm.mutex.Unlock()
+		dm.workerCancel()
+		dm.cancel()
+		dm.wg.Wait()
+		if err := dm.SaveState(); err != nil {
+			log.Printf("[MANAGER] Failed to save final state: %v", err)
+		}
+		log.Printf("[MANAGER] Download manager shutdown complete")
+	})
 }
