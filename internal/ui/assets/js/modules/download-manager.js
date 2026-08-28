@@ -1,10 +1,19 @@
-// @ts-nocheck -- Legacy DOM renderer; strict migration is tracked separately.
 /**
  * Download Manager Module
  * Handles download operations and UI updates
  */
 import { icon } from './icons.js';
+function toError(error) {
+    return error instanceof Error ? error : new Error(String(error));
+}
 export class DownloadManager {
+    apiClient;
+    uiManager;
+    downloads;
+    lastUpdateHash;
+    renderedSections;
+    sections;
+    _mediaModalWired = false;
     constructor(apiClient, uiManager) {
         this.apiClient = apiClient;
         this.uiManager = uiManager;
@@ -29,7 +38,10 @@ export class DownloadManager {
         // Download action buttons
         document.addEventListener('click', (e) => {
             // Find the button element, even if clicked on nested elements (span, icon, etc.)
-            const buttonElement = e.target.closest('[data-action][data-download-id]');
+            const target = e.target;
+            const buttonElement = target instanceof Element
+                ? target.closest('[data-action][data-download-id]')
+                : null;
             if (buttonElement) {
                 const action = buttonElement.dataset.action;
                 const downloadId = buttonElement.dataset.downloadId;
@@ -63,7 +75,8 @@ export class DownloadManager {
                 throw new Error(result.error || 'Unknown error');
             }
         }
-        catch (error) {
+        catch (caught) {
+            const error = toError(caught);
             if (error.code === 'ALREADY_DOWNLOADED' || error.code === 'ALREADY_PROCESSING') {
                 this.uiManager.showNotification(error.message, 'info');
             }
@@ -77,6 +90,8 @@ export class DownloadManager {
         }
     }
     async handlePlaylistDownload(event) {
+        if (!(event instanceof CustomEvent))
+            return;
         const { type } = event.detail;
         const formData = this.uiManager.getFormData('download-form');
         if (!formData || !formData.url) {
@@ -108,7 +123,8 @@ export class DownloadManager {
             this.uiManager.clearUrlValidation(); // Hide playlist options after successful start
             this.refreshDownloads(); // Non-blocking refresh
         }
-        catch (error) {
+        catch (caught) {
+            const error = toError(caught);
             this.uiManager.showNotification(`Failed to start download: ${error.message}`, 'error');
         }
         finally {
@@ -121,9 +137,9 @@ export class DownloadManager {
         this.uiManager.setLoading('download-first-video', false);
         const playlistButton = document.getElementById('download-playlist');
         const firstVideoButton = document.getElementById('download-first-video');
-        if (playlistButton)
+        if (playlistButton instanceof HTMLButtonElement)
             playlistButton.disabled = false;
-        if (firstVideoButton)
+        if (firstVideoButton instanceof HTMLButtonElement)
             firstVideoButton.disabled = false;
     }
     async handleDownloadAction(action, downloadId, buttonElement) {
@@ -181,7 +197,8 @@ export class DownloadManager {
                     throw new Error('Unknown action');
             }
         }
-        catch (error) {
+        catch (caught) {
+            const error = toError(caught);
             this.uiManager.showNotification(`Action failed: ${error.message}`, 'error');
         }
         finally {
@@ -192,7 +209,7 @@ export class DownloadManager {
     async refreshDownloads() {
         try {
             const downloads = await this.apiClient.getDownloads();
-            const newDownloads = downloads || [];
+            const newDownloads = Array.isArray(downloads) ? downloads : [];
             // Quick check if data has changed at all
             if (this.hasDownloadsChanged(newDownloads)) {
                 this.downloads = newDownloads;
@@ -259,7 +276,7 @@ export class DownloadManager {
         const progressETA = download.progress?.eta || '';
         const progressSpeed = download.progress?.speed || '';
         // Round percentage to 1 decimal place to allow gradual updates while avoiding micro-changes
-        const roundedPercentage = Math.round((download.progress?.percentage || 0) * 10) / 10;
+        const roundedPercentage = Math.round(this.parsePercentage(download.progress?.percentage) * 10) / 10;
         // file_size and codecs land asynchronously after a download completes (stat
         // + probe), so they must be in the hash or the card never repaints to show
         // the final size / codec badge / convert action.
@@ -275,26 +292,26 @@ export class DownloadManager {
                     aDate = new Date(a.created_at);
                     bDate = new Date(b.created_at);
                     // Primary sort: oldest first, secondary sort: by ID for stability
-                    const queueResult = aDate - bDate;
+                    const queueResult = aDate.getTime() - bDate.getTime();
                     return queueResult !== 0 ? queueResult : a.id.localeCompare(b.id);
                 case 'downloading':
                 case 'processing':
                     aDate = new Date(a.started_at || a.created_at);
                     bDate = new Date(b.started_at || b.created_at);
                     // Primary sort: newest first, secondary sort: by ID for stability
-                    const activeResult = bDate - aDate;
+                    const activeResult = bDate.getTime() - aDate.getTime();
                     return activeResult !== 0 ? activeResult : a.id.localeCompare(b.id);
                 case 'completed':
                     aDate = new Date(a.completed_at || a.created_at);
                     bDate = new Date(b.completed_at || b.created_at);
                     // Primary sort: newest first, secondary sort: by ID for stability
-                    const completedResult = bDate - aDate;
+                    const completedResult = bDate.getTime() - aDate.getTime();
                     return completedResult !== 0 ? completedResult : a.id.localeCompare(b.id);
                 case 'failed':
                     aDate = new Date(a.error_at || a.created_at);
                     bDate = new Date(b.error_at || b.created_at);
                     // Primary sort: newest first, secondary sort: by ID for stability
-                    const failedResult = bDate - aDate;
+                    const failedResult = bDate.getTime() - aDate.getTime();
                     return failedResult !== 0 ? failedResult : a.id.localeCompare(b.id);
                 default:
                     // Fallback to ID-based sorting for any unknown sections
@@ -404,7 +421,7 @@ export class DownloadManager {
         if (containerEl)
             containerEl.classList.toggle('progress-indeterminate', !!stage.indeterminate);
         const barEl = progressEl.querySelector('.progress-bar');
-        if (barEl)
+        if (barEl instanceof HTMLElement)
             barEl.style.width = `${stage.indeterminate ? 30 : bounded}%`;
         return true;
     }
@@ -503,7 +520,7 @@ export class DownloadManager {
         const boundedPercentage = Math.max(0, Math.min(100, percentage));
         const stage = this.getStageInfo(download, boundedPercentage, sectionKey, index);
         let ffmpegProgressHtml = '';
-        if (progress.phase || progress.ffmpeg_progress || progress.video_codec || progress.current_frame > 0) {
+        if (progress.phase || progress.ffmpeg_progress || progress.video_codec || (progress.current_frame ?? 0) > 0) {
             ffmpegProgressHtml = this.renderFFMPEGProgress(progress);
         }
         const barWidth = stage.indeterminate ? 30 : boundedPercentage;
@@ -541,7 +558,7 @@ export class DownloadManager {
     }
     // Stage drives the always-on feedback line: what the system is doing with
     // this entry right now, in plain words.
-    getStageInfo(download, percentage, sectionKey, index) {
+    getStageInfo(download, percentage, _sectionKey, index) {
         const phase = download.progress?.phase;
         if (download.status === 'queued') {
             return { label: `Waiting, position ${index + 1} in queue`, indeterminate: true, showPercent: false };
@@ -624,19 +641,21 @@ export class DownloadManager {
             }
         }
         // Processing Details Section
-        if (progress.current_frame > 0 || progress.bitrate || progress.processing_time) {
+        const currentFrame = progress.current_frame ?? 0;
+        const totalFrames = progress.total_frames ?? 0;
+        if (currentFrame > 0 || progress.bitrate || progress.processing_time) {
             const processingDetails = [];
-            if (progress.current_frame > 0) {
-                if (progress.total_frames > 0) {
+            if (currentFrame > 0) {
+                if (totalFrames > 0) {
                     processingDetails.push({
                         label: 'Frame Progress',
-                        value: `${progress.current_frame.toLocaleString()} / ${progress.total_frames.toLocaleString()}`
+                        value: `${currentFrame.toLocaleString()} / ${totalFrames.toLocaleString()}`
                     });
                 }
                 else {
                     processingDetails.push({
                         label: 'Current Frame',
-                        value: progress.current_frame.toLocaleString()
+                        value: currentFrame.toLocaleString()
                     });
                 }
             }
@@ -675,7 +694,7 @@ export class DownloadManager {
         const modal = document.getElementById('media-player-modal');
         const mount = document.getElementById('media-modal-mount');
         const title = document.getElementById('media-modal-title');
-        if (!modal || !mount || !title)
+        if (!(modal instanceof HTMLDialogElement) || !mount || !title)
             return;
         title.textContent = download.title || download.filename || 'Media';
         const isAudio = download.type === 'audio';
@@ -699,13 +718,13 @@ export class DownloadManager {
     }
     closeMediaPlayer() {
         const modal = document.getElementById('media-player-modal');
-        if (modal && modal.open)
+        if (modal instanceof HTMLDialogElement && modal.open)
             modal.close();
     }
     teardownMediaPlayer() {
         const mount = document.getElementById('media-modal-mount');
         const media = mount?.querySelector('video, audio');
-        if (media) {
+        if (media instanceof HTMLMediaElement) {
             media.pause();
             media.removeAttribute('src');
             media.load();
@@ -713,7 +732,7 @@ export class DownloadManager {
         if (mount)
             mount.replaceChildren();
     }
-    renderDownloadActions(download, sectionKey) {
+    renderDownloadActions(download, _sectionKey) {
         const actions = this.getAvailableActions(download.status)
             .filter(action => action !== 'convert' || this.canConvert(download));
         if (actions.length === 0)
@@ -789,7 +808,8 @@ export class DownloadManager {
             this.uiManager.showNotification('Queued downloads cleared', 'success');
             await this.refreshDownloads();
         }
-        catch (error) {
+        catch (caught) {
+            const error = toError(caught);
             this.uiManager.showNotification(`Failed to clear queued downloads: ${error.message}`, 'error');
         }
     }
@@ -803,7 +823,8 @@ export class DownloadManager {
             this.uiManager.showNotification('Completed downloads deleted', 'success');
             await this.refreshDownloads();
         }
-        catch (error) {
+        catch (caught) {
+            const error = toError(caught);
             this.uiManager.showNotification(`Failed to delete completed downloads: ${error.message}`, 'error');
         }
     }
@@ -817,7 +838,8 @@ export class DownloadManager {
             this.uiManager.showNotification('Failed downloads cleared', 'success');
             await this.refreshDownloads();
         }
-        catch (error) {
+        catch (caught) {
+            const error = toError(caught);
             this.uiManager.showNotification(`Failed to clear failed downloads: ${error.message}`, 'error');
         }
     }
@@ -843,7 +865,7 @@ export class DownloadManager {
     }
     escapeHtml(text) {
         const div = document.createElement('div');
-        div.textContent = text;
+        div.textContent = text == null ? '' : String(text);
         return div.innerHTML;
     }
     getDownloadsCount() {

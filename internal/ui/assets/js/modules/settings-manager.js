@@ -1,9 +1,16 @@
-// @ts-nocheck -- Legacy settings controller; strict migration is tracked separately.
 /**
  * Settings Manager Module
  * Handles application settings and configuration
  */
+const errorMessage = (error) => error instanceof Error ? error.message : String(error);
 export class SettingsManager {
+    apiClient;
+    uiManager;
+    settings;
+    versions;
+    isPanelOpen;
+    logoutWired = false;
+    cookieControlsWired = false;
     constructor(apiClient, uiManager) {
         this.apiClient = apiClient;
         this.uiManager = uiManager;
@@ -104,14 +111,17 @@ export class SettingsManager {
             return;
         // Update form fields
         Object.entries(this.settings).forEach(([key, value]) => {
-            const element = form.elements[key];
-            if (element) {
+            const element = form.elements.namedItem(key);
+            if (element instanceof HTMLInputElement) {
                 if (element.type === 'checkbox') {
                     element.checked = Boolean(value);
                 }
                 else {
-                    element.value = value || '';
+                    element.value = value == null ? '' : String(value);
                 }
+            }
+            else if (element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement) {
+                element.value = value == null ? '' : String(value);
             }
         });
     }
@@ -160,7 +170,7 @@ export class SettingsManager {
                 this.uiManager.showNotification('Cookies file uploaded', 'success');
             }
             catch (error) {
-                this.uiManager.showNotification(error.message || 'Cookies upload failed', 'error');
+                this.uiManager.showNotification(errorMessage(error) || 'Cookies upload failed', 'error');
             }
             finally {
                 fileInput.value = '';
@@ -174,7 +184,7 @@ export class SettingsManager {
                 this.refreshCookiesStatus();
             }
             catch (error) {
-                this.uiManager.showNotification(error.message || 'Failed to remove cookies', 'error');
+                this.uiManager.showNotification(errorMessage(error) || 'Failed to remove cookies', 'error');
             }
         });
         this.cookieControlsWired = true;
@@ -206,7 +216,10 @@ export class SettingsManager {
     }
     async handleSettingsSubmit(event) {
         event.preventDefault();
-        const formData = new FormData(event.target);
+        const form = event.currentTarget;
+        if (!(form instanceof HTMLFormElement))
+            return;
+        const formData = new FormData(form);
         const newSettings = {};
         // Extract form data
         for (const [key, value] of formData.entries()) {
@@ -214,10 +227,10 @@ export class SettingsManager {
                 // Convert numeric strings to numbers
                 if (key === 'port' || key === 'max_concurrent_downloads' || key === 'completed_file_expiry_hours'
                     || key === 'playlist_load_timeout_seconds' || key === 'download_start_timeout_seconds') {
-                    newSettings[key] = parseInt(value, 10);
+                    newSettings[key] = parseInt(String(value), 10);
                 }
                 else {
-                    newSettings[key] = value;
+                    newSettings[key] = String(value);
                 }
             }
         }
@@ -236,7 +249,7 @@ export class SettingsManager {
             this.applyClientTimeouts();
             this.uiManager.showNotification('Settings saved successfully', 'success');
             if (result && Array.isArray(result.warnings)) {
-                for (const warning of result.warnings) {
+                for (const warning of result.warnings.filter((value) => typeof value === 'string')) {
                     this.uiManager.showNotification(warning, 'warning', 10000);
                 }
             }
@@ -249,7 +262,7 @@ export class SettingsManager {
         }
         catch (error) {
             console.error('Failed to save settings:', error);
-            this.uiManager.showNotification(`Failed to save settings: ${error.message}`, 'error');
+            this.uiManager.showNotification(`Failed to save settings: ${errorMessage(error)}`, 'error');
         }
         finally {
             this.uiManager.setLoading('save-settings', false);
@@ -275,7 +288,7 @@ export class SettingsManager {
         }
         catch (error) {
             console.error('Failed to check for updates:', error);
-            this.uiManager.showNotification(`Failed to check for updates: ${error.message}`, 'error');
+            this.uiManager.showNotification(`Failed to check for updates: ${errorMessage(error)}`, 'error');
         }
         finally {
             this.uiManager.setLoading('check-updates', false);
@@ -301,7 +314,7 @@ export class SettingsManager {
         }
         catch (error) {
             console.error('Failed to update yt-dlp:', error);
-            this.uiManager.showNotification(`Failed to update yt-dlp: ${error.message}`, 'error');
+            this.uiManager.showNotification(`Failed to update yt-dlp: ${errorMessage(error)}`, 'error');
         }
         finally {
             this.uiManager.setLoading('update-ytdlp', false);
@@ -391,7 +404,7 @@ export class SettingsManager {
             this.uiManager.showNotification('Settings imported successfully', 'success');
         }
         catch (error) {
-            this.uiManager.showNotification(`Failed to import settings: ${error.message}`, 'error');
+            this.uiManager.showNotification(`Failed to import settings: ${errorMessage(error)}`, 'error');
         }
     }
     // Reset to defaults
@@ -423,7 +436,7 @@ export class SettingsManager {
             this.uiManager.showNotification('Settings reset to defaults', 'success');
         }
         catch (error) {
-            this.uiManager.showNotification(`Failed to reset settings: ${error.message}`, 'error');
+            this.uiManager.showNotification(`Failed to reset settings: ${errorMessage(error)}`, 'error');
         }
     }
     // Utility methods

@@ -1,11 +1,61 @@
-// @ts-nocheck -- Legacy settings controller; strict migration is tracked separately.
 /**
  * Settings Manager Module
  * Handles application settings and configuration
  */
 
+import type { ApiClient } from './api-client.js';
+
+type SettingValue = string | number | boolean | null | undefined;
+
+interface Settings extends Record<string, SettingValue> {
+  auth_enabled?: boolean;
+  version?: string;
+  port?: number;
+  max_concurrent_downloads?: number;
+  completed_file_expiry_hours?: number;
+  playlist_load_timeout_seconds?: number;
+  download_start_timeout_seconds?: number;
+}
+
+interface Versions extends Record<string, string | undefined> {
+  yt_dlp?: string;
+  ffmpeg?: string;
+}
+
+interface CookiesStatus {
+  present: boolean;
+  modified?: string;
+  path: string;
+}
+
+interface UpdateInfo {
+  update_available: boolean;
+  current_version: string;
+  latest_version: string;
+}
+
+interface UpdateResult {
+  warnings?: unknown;
+}
+
+interface SettingsUI {
+  showNotification(message: string, type?: string, duration?: number | null): void;
+  setLoading(elementId: string, loading: boolean, text?: string): void;
+}
+
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 export class SettingsManager {
-  constructor(apiClient, uiManager) {
+  apiClient: ApiClient;
+  uiManager: SettingsUI;
+  settings: Settings;
+  versions: Versions;
+  isPanelOpen: boolean;
+  logoutWired = false;
+  cookieControlsWired = false;
+
+  constructor(apiClient: ApiClient, uiManager: SettingsUI) {
     this.apiClient = apiClient;
     this.uiManager = uiManager;
     this.settings = {};
@@ -13,12 +63,12 @@ export class SettingsManager {
     this.isPanelOpen = false;
   }
 
-  async init() {
+  async init(): Promise<void> {
     this.setupEventListeners();
     await this.loadSettings();
   }
 
-  setupEventListeners() {
+  setupEventListeners(): void {
     // Settings form submission
     const settingsForm = document.getElementById('settings-form');
     if (settingsForm) {
@@ -62,15 +112,15 @@ export class SettingsManager {
     });
   }
 
-  async loadSettings() {
+  async loadSettings(): Promise<void> {
     try {
       const [settings, versions] = await Promise.all([
         this.apiClient.getConfig(),
         this.apiClient.getVersions()
       ]);
 
-      this.settings = settings;
-      this.versions = versions;
+      this.settings = settings as Settings;
+      this.versions = versions as Versions;
 
       this.applyClientTimeouts();
       this.updateSettingsForm();
@@ -85,7 +135,7 @@ export class SettingsManager {
   }
 
   // Reveal and wire the sign-out control only when auth is enabled.
-  setupLogout() {
+  setupLogout(): void {
     const logoutBtn = document.getElementById('logout-btn');
     if (!logoutBtn || !this.settings?.auth_enabled || this.logoutWired) {
       return;
@@ -104,31 +154,33 @@ export class SettingsManager {
 
   // Push the configured network timeouts onto the API client so its fetch
   // aborts stay above the matching server-side timeouts.
-  applyClientTimeouts() {
+  applyClientTimeouts(): void {
     this.apiClient.setActionTimeouts({
       downloadStartSeconds: Number(this.settings.download_start_timeout_seconds),
       playlistSeconds: Number(this.settings.playlist_load_timeout_seconds),
     });
   }
 
-  updateSettingsForm() {
-    const form = document.getElementById('settings-form');
+  updateSettingsForm(): void {
+    const form = document.getElementById('settings-form') as HTMLFormElement | null;
     if (!form) return;
 
     // Update form fields
     Object.entries(this.settings).forEach(([key, value]) => {
-      const element = form.elements[key];
-      if (element) {
+      const element = form.elements.namedItem(key);
+      if (element instanceof HTMLInputElement) {
         if (element.type === 'checkbox') {
           element.checked = Boolean(value);
         } else {
-          element.value = value || '';
+          element.value = value == null ? '' : String(value);
         }
+      } else if (element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement) {
+        element.value = value == null ? '' : String(value);
       }
     });
   }
 
-  updateVersionInfo() {
+  updateVersionInfo(): void {
     // Update yt-dlp version
     const ytdlpVersion = document.getElementById('ytdlp-version');
     if (ytdlpVersion) {
@@ -156,11 +208,11 @@ export class SettingsManager {
     }
   }
 
-  wireCookieControls() {
+  wireCookieControls(): void {
     if (this.cookieControlsWired) return;
     const uploadBtn = document.getElementById('cookies_upload_btn');
     const removeBtn = document.getElementById('cookies_remove_btn');
-    const fileInput = document.getElementById('cookies_file_input');
+    const fileInput = document.getElementById('cookies_file_input') as HTMLInputElement | null;
     if (!uploadBtn || !removeBtn || !fileInput) return;
 
     // The Upload button opens the (hidden) file picker; selecting a file
@@ -173,7 +225,7 @@ export class SettingsManager {
         await this.apiClient.uploadCookies(file);
         this.uiManager.showNotification('Cookies file uploaded', 'success');
       } catch (error) {
-        this.uiManager.showNotification(error.message || 'Cookies upload failed', 'error');
+        this.uiManager.showNotification(errorMessage(error) || 'Cookies upload failed', 'error');
       } finally {
         fileInput.value = '';
         this.refreshCookiesStatus();
@@ -186,19 +238,19 @@ export class SettingsManager {
         this.uiManager.showNotification('Cookies file removed', 'success');
         this.refreshCookiesStatus();
       } catch (error) {
-        this.uiManager.showNotification(error.message || 'Failed to remove cookies', 'error');
+        this.uiManager.showNotification(errorMessage(error) || 'Failed to remove cookies', 'error');
       }
     });
 
     this.cookieControlsWired = true;
   }
 
-  async refreshCookiesStatus() {
+  async refreshCookiesStatus(): Promise<void> {
     const el = document.getElementById('cookies_status');
     const removeBtn = document.getElementById('cookies_remove_btn');
     if (!el) return;
     try {
-      const status = await this.apiClient.getCookiesStatus();
+      const status = await this.apiClient.getCookiesStatus() as CookiesStatus;
       if (status.present) {
         const when = status.modified ? new Date(status.modified).toLocaleString() : 'unknown';
         el.textContent = `Cookies file present at ${status.path} · updated ${when}`;
@@ -213,11 +265,13 @@ export class SettingsManager {
     }
   }
 
-  async handleSettingsSubmit(event) {
+  async handleSettingsSubmit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
 
-    const formData = new FormData(event.target);
-    const newSettings = {};
+    const form = event.currentTarget;
+    if (!(form instanceof HTMLFormElement)) return;
+    const formData = new FormData(form);
+    const newSettings: Settings = {};
 
     // Extract form data
     for (const [key, value] of formData.entries()) {
@@ -225,9 +279,9 @@ export class SettingsManager {
         // Convert numeric strings to numbers
         if (key === 'port' || key === 'max_concurrent_downloads' || key === 'completed_file_expiry_hours'
             || key === 'playlist_load_timeout_seconds' || key === 'download_start_timeout_seconds') {
-          newSettings[key] = parseInt(value, 10);
+          newSettings[key] = parseInt(String(value), 10);
         } else {
-          newSettings[key] = value;
+          newSettings[key] = String(value);
         }
       }
     }
@@ -245,14 +299,14 @@ export class SettingsManager {
     try {
       this.uiManager.setLoading('save-settings', true, 'Saving...');
 
-      const result = await this.apiClient.updateConfig(newSettings);
+      const result = await this.apiClient.updateConfig(newSettings) as UpdateResult;
       this.settings = { ...this.settings, ...newSettings };
       this.applyClientTimeouts();
 
       this.uiManager.showNotification('Settings saved successfully', 'success');
 
       if (result && Array.isArray(result.warnings)) {
-        for (const warning of result.warnings) {
+        for (const warning of result.warnings.filter((value): value is string => typeof value === 'string')) {
           this.uiManager.showNotification(warning, 'warning', 10000);
         }
       }
@@ -271,17 +325,17 @@ export class SettingsManager {
 
     } catch (error) {
       console.error('Failed to save settings:', error);
-      this.uiManager.showNotification(`Failed to save settings: ${error.message}`, 'error');
+      this.uiManager.showNotification(`Failed to save settings: ${errorMessage(error)}`, 'error');
     } finally {
       this.uiManager.setLoading('save-settings', false);
     }
   }
 
-  async checkForUpdates() {
+  async checkForUpdates(): Promise<void> {
     try {
       this.uiManager.setLoading('check-updates', true, 'Checking...');
 
-      const updateInfo = await this.apiClient.getYtDlpVersion();
+      const updateInfo = await this.apiClient.getYtDlpVersion() as UpdateInfo;
 
       if (updateInfo.update_available) {
         this.uiManager.showNotification(
@@ -291,7 +345,7 @@ export class SettingsManager {
         );
 
         // Enable update button
-        const updateButton = document.getElementById('update-ytdlp');
+        const updateButton = document.getElementById('update-ytdlp') as HTMLButtonElement | null;
         if (updateButton) {
           updateButton.disabled = false;
           updateButton.textContent = 'Update Available';
@@ -303,13 +357,13 @@ export class SettingsManager {
 
     } catch (error) {
       console.error('Failed to check for updates:', error);
-      this.uiManager.showNotification(`Failed to check for updates: ${error.message}`, 'error');
+      this.uiManager.showNotification(`Failed to check for updates: ${errorMessage(error)}`, 'error');
     } finally {
       this.uiManager.setLoading('check-updates', false);
     }
   }
 
-  async handleYtDlpUpdate() {
+  async handleYtDlpUpdate(): Promise<void> {
     if (!confirm('This will update yt-dlp to the latest version. Continue?')) {
       return;
     }
@@ -325,7 +379,7 @@ export class SettingsManager {
       await this.loadVersions();
 
       // Reset update button
-      const updateButton = document.getElementById('update-ytdlp');
+      const updateButton = document.getElementById('update-ytdlp') as HTMLButtonElement | null;
       if (updateButton) {
         updateButton.disabled = true;
         updateButton.textContent = 'Update yt-dlp';
@@ -334,22 +388,22 @@ export class SettingsManager {
 
     } catch (error) {
       console.error('Failed to update yt-dlp:', error);
-      this.uiManager.showNotification(`Failed to update yt-dlp: ${error.message}`, 'error');
+      this.uiManager.showNotification(`Failed to update yt-dlp: ${errorMessage(error)}`, 'error');
     } finally {
       this.uiManager.setLoading('update-ytdlp', false);
     }
   }
 
-  async loadVersions() {
+  async loadVersions(): Promise<void> {
     try {
-      this.versions = await this.apiClient.getVersions();
+      this.versions = await this.apiClient.getVersions() as Versions;
       this.updateVersionInfo();
     } catch (error) {
       console.error('Failed to load versions:', error);
     }
   }
 
-  togglePanel() {
+  togglePanel(): void {
     if (this.isPanelOpen) {
       this.closePanel();
     } else {
@@ -357,7 +411,7 @@ export class SettingsManager {
     }
   }
 
-  openPanel() {
+  openPanel(): void {
     const panel = document.getElementById('settings-panel');
     const overlay = document.getElementById('settings-overlay');
 
@@ -367,14 +421,14 @@ export class SettingsManager {
       this.isPanelOpen = true;
 
       // Focus first input
-      const firstInput = panel.querySelector('input, select, textarea');
+      const firstInput = panel.querySelector<HTMLElement>('input, select, textarea');
       if (firstInput) {
         setTimeout(() => firstInput.focus(), 300);
       }
     }
   }
 
-  closePanel() {
+  closePanel(): void {
     const panel = document.getElementById('settings-panel');
     const overlay = document.getElementById('settings-overlay');
 
@@ -386,8 +440,8 @@ export class SettingsManager {
   }
 
   // Validation helpers
-  validateSettings(settings) {
-    const errors = [];
+  validateSettings(settings: Settings): string[] {
+    const errors: string[] = [];
 
     if (settings.port && (settings.port < 1 || settings.port > 65535)) {
       errors.push('Port must be between 1 and 65535');
@@ -405,7 +459,7 @@ export class SettingsManager {
   }
 
   // Export/Import settings (for future use)
-  exportSettings() {
+  exportSettings(): void {
     const settingsBlob = new Blob([JSON.stringify(this.settings, null, 2)], {
       type: 'application/json'
     });
@@ -420,10 +474,10 @@ export class SettingsManager {
     URL.revokeObjectURL(url);
   }
 
-  async importSettings(file) {
+  async importSettings(file: File): Promise<void> {
     try {
       const text = await file.text();
-      const importedSettings = JSON.parse(text);
+      const importedSettings = JSON.parse(text) as Settings;
 
       // Validate imported settings
       const errors = this.validateSettings(importedSettings);
@@ -438,12 +492,12 @@ export class SettingsManager {
 
       this.uiManager.showNotification('Settings imported successfully', 'success');
     } catch (error) {
-      this.uiManager.showNotification(`Failed to import settings: ${error.message}`, 'error');
+      this.uiManager.showNotification(`Failed to import settings: ${errorMessage(error)}`, 'error');
     }
   }
 
   // Reset to defaults
-  async resetToDefaults() {
+  async resetToDefaults(): Promise<void> {
     if (!confirm('Are you sure you want to reset all settings to defaults? This cannot be undone.')) {
       return;
     }
@@ -473,21 +527,21 @@ export class SettingsManager {
 
       this.uiManager.showNotification('Settings reset to defaults', 'success');
     } catch (error) {
-      this.uiManager.showNotification(`Failed to reset settings: ${error.message}`, 'error');
+      this.uiManager.showNotification(`Failed to reset settings: ${errorMessage(error)}`, 'error');
     }
   }
 
   // Utility methods
-  getSetting(key, defaultValue = null) {
+  getSetting(key: string, defaultValue: SettingValue = null): SettingValue {
     return this.settings[key] ?? defaultValue;
   }
 
-  getVersion(component) {
+  getVersion(component: string): string {
     return this.versions[component] || 'Unknown';
   }
 
   // Cleanup
-  cleanup() {
+  cleanup(): void {
     this.closePanel();
   }
 }

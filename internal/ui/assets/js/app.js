@@ -1,4 +1,3 @@
-// @ts-nocheck -- Legacy controller; strict migration is tracked separately.
 /**
  * goyt - Main Application Module
  * Modern vanilla JavaScript with ES6 modules
@@ -8,6 +7,12 @@ import { SettingsManager } from './modules/settings-manager.js';
 import { UIManager } from './modules/ui-manager.js';
 import { ApiClient } from './modules/api-client.js';
 class goytApp {
+    apiClient;
+    uiManager;
+    downloadManager;
+    settingsManager;
+    pollInterval;
+    isInitialized;
     constructor() {
         this.apiClient = new ApiClient();
         this.uiManager = new UIManager(this.apiClient);
@@ -53,21 +58,21 @@ class goytApp {
         const urlInput = document.getElementById('url-input');
         if (urlInput) {
             let validationTimeout;
-            urlInput.addEventListener('input', (e) => {
+            urlInput.addEventListener('input', () => {
                 clearTimeout(validationTimeout);
                 const submitBtn = document.getElementById('submit-button');
                 if (submitBtn) {
                     submitBtn.disabled = true; // Disable while validating
                 }
                 validationTimeout = setTimeout(() => {
-                    this.handleUrlValidation(e.target.value);
+                    this.handleUrlValidation(urlInput.value);
                 }, 500);
             });
         }
         // Type selector change
         const typeSelect = document.getElementById('type-select');
         if (typeSelect) {
-            typeSelect.addEventListener('change', this.handleTypeChange.bind(this));
+            typeSelect.addEventListener('change', () => this.handleTypeChange({ target: typeSelect }));
             // Initialize on page load
             this.handleTypeChange({ target: typeSelect });
         }
@@ -87,12 +92,19 @@ class goytApp {
     }
     async handleDownloadSubmit(event) {
         event.preventDefault();
-        const formData = new FormData(event.target);
+        const form = event.currentTarget;
+        if (!(form instanceof HTMLFormElement))
+            return;
+        const formData = new FormData(form);
+        const urlValue = formData.get('url');
+        const typeValue = formData.get('type');
+        const qualityValue = formData.get('quality');
+        const formatValue = formData.get('format');
         const downloadData = {
-            url: formData.get('url')?.trim(),
-            type: formData.get('type') || 'video',
-            quality: formData.get('quality') || 'best',
-            format: formData.get('format') || 'mp4'
+            url: typeof urlValue === 'string' ? urlValue.trim() : '',
+            type: typeof typeValue === 'string' && typeValue ? typeValue : 'video',
+            quality: typeof qualityValue === 'string' && qualityValue ? qualityValue : 'best',
+            format: typeof formatValue === 'string' && formatValue ? formatValue : 'mp4'
         };
         if (!downloadData.url) {
             this.uiManager.showNotification('Please enter a valid URL', 'warning');
@@ -100,7 +112,7 @@ class goytApp {
         }
         try {
             await this.downloadManager.startDownload(downloadData);
-            event.target.reset();
+            form.reset();
             this.uiManager.clearUrlValidation();
         }
         catch (error) {
@@ -144,7 +156,7 @@ class goytApp {
             // links, where playlist enumeration can be slow), tell the user instead
             // of clearing the panel silently, and allow the download attempt anyway
             // (the server validates the request again).
-            const message = error.message === 'Request timed out'
+            const message = error instanceof Error && error.message === 'Request timed out'
                 ? 'Validation timed out (slow network). You can still try the download.'
                 : 'Could not validate the URL. You can still try the download.';
             this.uiManager.showUrlValidationWarning(message);
@@ -154,8 +166,8 @@ class goytApp {
         }
     }
     handleTypeChange(event) {
-        const selectedType = event.target.value;
-        const qualityGroup = document.querySelector('#quality-select').closest('.form-group');
+        const selectedType = event.target.value === 'audio' ? 'audio' : 'video';
+        const qualityGroup = document.querySelector('#quality-select')?.closest('.form-group');
         const formatSelect = document.getElementById('format-select');
         // Define format options for each type
         const formats = {

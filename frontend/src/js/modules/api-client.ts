@@ -3,6 +3,13 @@
  * Handles all API communication with the backend
  */
 
+export interface URLValidationResult {
+  valid: boolean;
+  is_playlist?: boolean;
+  playlist_count?: number;
+  first_video_title?: string;
+}
+
 export class ApiClient {
   baseUrl: string;
   timeout: number;
@@ -31,7 +38,7 @@ export class ApiClient {
     }
   }
 
-  async request(endpoint: string, options: RequestInit & { timeout?: number } = {}): Promise<unknown> {
+  async request<T = unknown>(endpoint: string, options: RequestInit & { timeout?: number } = {}): Promise<T> {
     const url = `${this.baseUrl}/api${endpoint}`;
 
     const defaultOptions = {
@@ -66,17 +73,17 @@ export class ApiClient {
 
       // Handle empty responses (like 204 No Content)
       if (response.status === 204 || response.headers.get('content-length') === '0') {
-        return {};
+        return {} as T;
       }
 
       // Check if response has content to parse
       const contentType = response.headers.get('content-type');
       if (contentType && contentType.includes('application/json')) {
-        return await response.json();
+        return await response.json() as T;
       }
 
       // For non-JSON responses, return empty object
-      return {};
+      return {} as T;
     } catch (error) {
       clearTimeout(timeoutId);
 
@@ -197,7 +204,7 @@ export class ApiClient {
 
   // URL validation
   async validateUrl(url: string, type = 'video', quality = 'best', format = 'mp4') {
-    return this.request('/validate', {
+    return this.request<URLValidationResult>('/validate', {
       method: 'POST',
       body: JSON.stringify({ url, type, quality, format }),
       // Longer than the server-side validation timeout (playlist enumeration)

@@ -1,13 +1,31 @@
-// @ts-nocheck -- Legacy DOM utility; strict migration is tracked separately.
 /**
  * UI Manager Module
  * Handles all UI interactions and DOM manipulation
  */
 
 import { icon } from './icons.js';
+import type { ApiClient, URLValidationResult } from './api-client.js';
+
+type NotificationType = 'success' | 'error' | 'warning' | 'info';
+type PlaylistDownloadType = 'playlist' | 'first';
+type AccordionSection = 'completed' | 'downloading' | 'queued' | 'processing' | 'failed';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function stringProperty(value: unknown, property: string): string | undefined {
+  if (!isRecord(value)) return undefined;
+  const propertyValue = value[property];
+  return typeof propertyValue === 'string' ? propertyValue : undefined;
+}
 
 export class UIManager {
-  constructor(apiClient = null) {
+  private readonly apiClient: ApiClient | null;
+  private notifications: HTMLElement[];
+  private readonly accordionStates: Record<AccordionSection, boolean>;
+
+  constructor(apiClient: ApiClient | null = null) {
     this.apiClient = apiClient;
     this.notifications = [];
     this.accordionStates = {
@@ -19,9 +37,9 @@ export class UIManager {
     };
   }
 
-  escapeHtml(text) {
+  escapeHtml(text: unknown): string {
     const div = document.createElement('div');
-    div.textContent = text ?? '';
+    div.textContent = text == null ? '' : String(text);
     return div.innerHTML;
   }
 
@@ -34,10 +52,12 @@ export class UIManager {
 
   setupFormBehavior() {
     // Handle type selector change to update format options
-    const typeSelect = document.querySelector('#type-select');
+    const typeSelect = document.querySelector<HTMLSelectElement>('#type-select');
     if (typeSelect) {
-      typeSelect.addEventListener('change', (e) => {
-        this.updateFormatOptions(e.target.value);
+      typeSelect.addEventListener('change', (event) => {
+        if (event.target instanceof HTMLSelectElement) {
+          this.updateFormatOptions(event.target.value);
+        }
       });
     }
   }
@@ -61,7 +81,7 @@ export class UIManager {
     document.body.appendChild(container);
   }
 
-  showNotification(message, type = 'info', duration = null) {
+  showNotification(message: string, type: NotificationType = 'info', duration: number | null = null) {
     // Errors linger so failures stay readable; other toasts clear sooner.
     if (duration === null) {
       duration = type === 'error' ? 5000 : 3500;
@@ -81,8 +101,8 @@ export class UIManager {
     `;
 
     // Add close functionality
-    const closeBtn = notification.querySelector('.btn-close');
-    closeBtn.addEventListener('click', () => this.removeNotification(notification));
+    const closeBtn = notification.querySelector<HTMLButtonElement>('.btn-close');
+    closeBtn?.addEventListener('click', () => this.removeNotification(notification));
 
     // Auto remove after duration
     if (duration > 0) {
@@ -90,12 +110,12 @@ export class UIManager {
     }
 
     const container = document.getElementById('notification-container');
-    container.appendChild(notification);
+    container?.appendChild(notification);
 
     this.notifications.push(notification);
   }
 
-  removeNotification(notification) {
+  removeNotification(notification: HTMLElement) {
     notification.classList.add('leaving');
     setTimeout(() => {
       if (notification.parentNode) {
@@ -105,18 +125,18 @@ export class UIManager {
     }, 300);
   }
 
-  getNotificationIcon(type) {
-    const icons = {
+  getNotificationIcon(type: NotificationType): string {
+    const icons: Record<NotificationType, string> = {
       success: 'check-circle',
       error: 'alert-circle',
       warning: 'alert-triangle',
       info: 'info'
     };
-    return icons[type] || icons.info;
+    return icons[type];
   }
 
   // Connection status
-  updateConnectionStatus(isConnected) {
+  updateConnectionStatus(isConnected: boolean) {
     const statusElement = document.getElementById('connection-status');
     if (!statusElement) return;
 
@@ -141,7 +161,7 @@ export class UIManager {
     container.classList.remove('hidden');
   }
 
-  showUrlValidationResult(result) {
+  showUrlValidationResult(result: URLValidationResult) {
     const container = document.getElementById('url-validation');
     if (!container) return;
 
@@ -171,7 +191,7 @@ export class UIManager {
     container.classList.remove('hidden');
   }
 
-  showUrlValidationWarning(message) {
+  showUrlValidationWarning(message: string) {
     const container = document.getElementById('url-validation');
     if (!container) return;
     container.innerHTML = `
@@ -196,7 +216,7 @@ export class UIManager {
     }
   }
 
-  showPlaylistOptions(playlistInfo) {
+  showPlaylistOptions(playlistInfo: URLValidationResult) {
     const container = document.getElementById('playlist-options');
     if (!container) return;
 
@@ -230,10 +250,10 @@ export class UIManager {
     });
   }
 
-  triggerPlaylistDownload(type) {
+  triggerPlaylistDownload(type: PlaylistDownloadType) {
     // Immediately disable buttons and show loading state
-    const playlistButton = document.getElementById('download-playlist');
-    const firstVideoButton = document.getElementById('download-first-video');
+    const playlistButton = document.querySelector<HTMLButtonElement>('#download-playlist');
+    const firstVideoButton = document.querySelector<HTMLButtonElement>('#download-first-video');
 
     if (type === 'playlist' && playlistButton) {
       this.setLoading('download-playlist', true, 'Processing Playlist...');
@@ -253,30 +273,33 @@ export class UIManager {
 
   // Accordion functionality
   setupAccordions() {
-    document.addEventListener('click', (e) => {
-      const header = e.target.closest('.section-header');
+    document.addEventListener('click', (event) => {
+      if (!(event.target instanceof Element)) return;
+      const header = event.target.closest<HTMLElement>('.section-header');
       if (header?.dataset.section) {
         this.toggleAccordion(header.dataset.section);
       }
     });
-    document.addEventListener('keydown', (e) => {
-      if (e.key !== 'Enter' && e.key !== ' ') return;
-      const header = e.target.closest?.('.section-header');
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      if (!(event.target instanceof Element)) return;
+      const header = event.target.closest<HTMLElement>('.section-header');
       if (header?.dataset.section) {
-        e.preventDefault();
+        event.preventDefault();
         this.toggleAccordion(header.dataset.section);
       }
     });
   }
 
-  toggleAccordion(sectionId) {
+  toggleAccordion(sectionId: string) {
     const content = document.getElementById(`${sectionId}-content`);
     const header = document.querySelector(`[data-section="${sectionId}"]`);
 
-    if (!content) return;
+    if (!content || !(sectionId in this.accordionStates)) return;
 
-    const isExpanded = this.accordionStates[sectionId];
-    this.accordionStates[sectionId] = !isExpanded;
+    const section = sectionId as AccordionSection;
+    const isExpanded = this.accordionStates[section];
+    this.accordionStates[section] = !isExpanded;
 
     content.classList.toggle('section-collapsed', isExpanded);
     content.classList.toggle('section-expanded', !isExpanded);
@@ -284,10 +307,10 @@ export class UIManager {
   }
 
   // Progress bars
-  updateProgressBar(element, percentage, status = '') {
+  updateProgressBar(element: Element | null, percentage: number, status = '') {
     if (!element) return;
 
-    const progressBar = element.querySelector('.progress-bar');
+    const progressBar = element.querySelector<HTMLElement>('.progress-bar');
     if (progressBar) {
       progressBar.style.width = `${Math.max(0, Math.min(100, percentage))}%`;
 
@@ -304,12 +327,12 @@ export class UIManager {
   }
 
   // Form helpers
-  getFormData(formId) {
+  getFormData(formId: string): Record<string, FormDataEntryValue> | null {
     const form = document.getElementById(formId);
-    if (!form) return null;
+    if (!(form instanceof HTMLFormElement)) return null;
 
     const formData = new FormData(form);
-    const data = {};
+    const data: Record<string, FormDataEntryValue> = {};
 
     for (const [key, value] of formData.entries()) {
       data[key] = value;
@@ -318,28 +341,32 @@ export class UIManager {
     return data;
   }
 
-  setFormData(formId, data) {
+  setFormData(formId: string, data: Record<string, unknown>) {
     const form = document.getElementById(formId);
-    if (!form) return;
+    if (!(form instanceof HTMLFormElement)) return;
 
     Object.entries(data).forEach(([key, value]) => {
-      const element = form.elements[key];
-      if (element) {
-        if (element.type === 'checkbox') {
-          element.checked = Boolean(value);
-        } else {
-          element.value = value;
-        }
+      const element = form.elements.namedItem(key);
+      if (element instanceof HTMLInputElement && element.type === 'checkbox') {
+        element.checked = Boolean(value);
+      } else if (
+        element instanceof HTMLInputElement ||
+        element instanceof HTMLSelectElement ||
+        element instanceof HTMLTextAreaElement
+      ) {
+        element.value = value == null ? '' : String(value);
+      } else if (element instanceof RadioNodeList) {
+        element.value = value == null ? '' : String(value);
       }
     });
   }
 
-  async resetForm(formId) {
+  async resetForm(formId: string) {
     const form = document.getElementById(formId);
-    if (!form) return;
+    if (!(form instanceof HTMLFormElement)) return;
 
     // Clear the URL field and validation
-    const urlInput = form.querySelector('#url-input');
+    const urlInput = form.querySelector<HTMLInputElement>('#url-input');
     if (urlInput) {
       urlInput.value = '';
     }
@@ -351,30 +378,30 @@ export class UIManager {
         const config = await this.apiClient.getConfig();
 
         // Set default values from config
-        const typeSelect = form.querySelector('#type-select');
-        const qualitySelect = form.querySelector('#quality-select');
-        const formatSelect = form.querySelector('#format-select');
+        const typeSelect = form.querySelector<HTMLSelectElement>('#type-select');
+        const qualitySelect = form.querySelector<HTMLSelectElement>('#quality-select');
+        const formatSelect = form.querySelector<HTMLSelectElement>('#format-select');
 
         if (typeSelect) {
           typeSelect.value = 'video'; // Always default to video
         }
 
         if (qualitySelect) {
-          qualitySelect.value = config.default_video_quality || '1080p';
+          qualitySelect.value = stringProperty(config, 'default_video_quality') || '1080p';
         }
 
         if (formatSelect) {
           // Update format options first based on type
           this.updateFormatOptions('video');
-          formatSelect.value = config.default_video_format || 'mp4';
+          formatSelect.value = stringProperty(config, 'default_video_format') || 'mp4';
         }
 
       } catch (error) {
         console.warn('Failed to get config for form reset, using fallback defaults:', error);
         // Fallback to hardcoded defaults
-        const typeSelect = form.querySelector('#type-select');
-        const qualitySelect = form.querySelector('#quality-select');
-        const formatSelect = form.querySelector('#format-select');
+        const typeSelect = form.querySelector<HTMLSelectElement>('#type-select');
+        const qualitySelect = form.querySelector<HTMLSelectElement>('#quality-select');
+        const formatSelect = form.querySelector<HTMLSelectElement>('#format-select');
 
         if (typeSelect) typeSelect.value = 'video';
         if (qualitySelect) qualitySelect.value = '1080p';
@@ -386,8 +413,8 @@ export class UIManager {
     }
   }
 
-  updateFormatOptions(type) {
-    const formatSelect = document.querySelector('#format-select');
+  updateFormatOptions(type: string) {
+    const formatSelect = document.querySelector<HTMLSelectElement>('#format-select');
     if (!formatSelect) return;
 
     // Clear existing options
@@ -434,9 +461,9 @@ export class UIManager {
   }
 
   // Loading states
-  setLoading(elementId, isLoading, loadingText = 'Loading...') {
+  setLoading(elementId: string, isLoading: boolean, loadingText = 'Loading...') {
     const element = document.getElementById(elementId);
-    if (!element) return;
+    if (!(element instanceof HTMLButtonElement)) return;
 
     if (isLoading) {
       element.disabled = true;
@@ -454,7 +481,7 @@ export class UIManager {
   }
 
   // Modal helpers (for future use)
-  showModal(modalId) {
+  showModal(modalId: string) {
     const modal = document.getElementById(modalId);
     if (modal) {
       modal.classList.add('show');
@@ -462,7 +489,7 @@ export class UIManager {
     }
   }
 
-  hideModal(modalId) {
+  hideModal(modalId: string) {
     const modal = document.getElementById(modalId);
     if (modal) {
       modal.classList.remove('show');
@@ -471,17 +498,17 @@ export class UIManager {
   }
 
   // Utility methods
-  formatFileSize(bytes) {
-    if (bytes === 0) return '0 Bytes';
+  formatFileSize(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes <= 0) return '0 Bytes';
 
     const k = 1024;
     const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
 
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + (sizes[i] ?? 'Bytes');
   }
 
-  formatDuration(seconds) {
+  formatDuration(seconds: number): string {
     if (!seconds || seconds < 0) return '00:00';
 
     const hours = Math.floor(seconds / 3600);
@@ -495,7 +522,7 @@ export class UIManager {
     return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
 
-  formatDate(dateString) {
+  formatDate(dateString: string | null | undefined): string {
     if (!dateString) return 'Unknown';
 
     const date = new Date(dateString);

@@ -1,13 +1,102 @@
-// @ts-nocheck -- Legacy DOM renderer; strict migration is tracked separately.
 /**
  * Download Manager Module
  * Handles download operations and UI updates
  */
 
 import { icon } from './icons.js';
+import type { ApiClient } from './api-client.js';
+import type { UIManager } from './ui-manager.js';
+
+type SectionKey = 'queued' | 'downloading' | 'processing' | 'completed' | 'failed';
+type DownloadAction = 'cancel' | 'pause' | 'resume' | 'retry' | 'remove' | 'download' | 'play' | 'convert';
+
+interface DownloadProgress {
+  percentage?: number | string;
+  phase?: string;
+  current_frame?: number;
+  total_frames?: number;
+  eta?: string;
+  speed?: string;
+  size?: string;
+  ffmpeg_progress?: string;
+  video_codec?: string;
+  audio_codec?: string;
+  resolution?: string;
+  fps?: number | string;
+  bitrate?: string;
+  processing_time?: string;
+}
+
+interface Download {
+  id: string;
+  status: string;
+  title?: string;
+  filename?: string;
+  url: string;
+  type: string;
+  quality: string;
+  format: string;
+  error?: string;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+  error_at?: string;
+  file_size?: number | string;
+  video_codec?: string;
+  audio_codec?: string;
+  converted?: boolean;
+  progress?: DownloadProgress;
+}
+
+interface Section {
+  downloads: Download[];
+  expanded: boolean;
+}
+
+interface RenderedItem {
+  id: string;
+  status: string;
+  hash: string;
+  download: Download;
+  index: number;
+}
+
+interface RenderedSection {
+  orderKey: string;
+  items: RenderedItem[];
+}
+
+interface StageInfo {
+  label: string;
+  indeterminate: boolean;
+  showPercent: boolean;
+}
+
+interface DownloadFormData {
+  url?: string;
+  type?: string;
+  quality?: string;
+  format?: string;
+}
+
+interface CodedError extends Error {
+  code?: string;
+}
+
+function toError(error: unknown): CodedError {
+  return error instanceof Error ? error as CodedError : new Error(String(error));
+}
 
 export class DownloadManager {
-  constructor(apiClient, uiManager) {
+  apiClient: ApiClient;
+  uiManager: UIManager;
+  downloads: Download[];
+  lastUpdateHash: Map<string, string>;
+  renderedSections: Partial<Record<SectionKey, RenderedSection | null>>;
+  sections: Record<SectionKey, Section>;
+  private _mediaModalWired = false;
+
+  constructor(apiClient: ApiClient, uiManager: UIManager) {
     this.apiClient = apiClient;
     this.uiManager = uiManager;
     this.downloads = [];
@@ -22,32 +111,35 @@ export class DownloadManager {
     };
   }
 
-  async init() {
+  async init(): Promise<void> {
     this.setupEventListeners();
     await this.refreshDownloads();
   }
 
-  setupEventListeners() {
+  setupEventListeners(): void {
     // Playlist download events
     document.addEventListener('playlistDownload', this.handlePlaylistDownload.bind(this));
 
     // Download action buttons
     document.addEventListener('click', (e) => {
       // Find the button element, even if clicked on nested elements (span, icon, etc.)
-      const buttonElement = e.target.closest('[data-action][data-download-id]');
+      const target = e.target;
+      const buttonElement = target instanceof Element
+        ? target.closest<HTMLButtonElement>('[data-action][data-download-id]')
+        : null;
 
       if (buttonElement) {
         const action = buttonElement.dataset.action;
         const downloadId = buttonElement.dataset.downloadId;
 
         if (action && downloadId) {
-          this.handleDownloadAction(action, downloadId, buttonElement);
+          this.handleDownloadAction(action as DownloadAction, downloadId, buttonElement);
         }
       }
     });
 
     // Bulk action buttons
-    const bulkActions = {
+    const bulkActions: Record<string, () => Promise<void>> = {
       'clear-queued': () => this.clearQueuedDownloads(),
       'delete-completed': () => this.deleteCompletedDownloads(),
       'clear-failed': () => this.clearFailedDownloads()
@@ -61,11 +153,11 @@ export class DownloadManager {
     });
   }
 
-  async startDownload(downloadData) {
+  async startDownload(downloadData: unknown): Promise<void> {
     try {
       this.uiManager.setLoading('submit-button', true, 'Starting...');
 
-      const result = await this.apiClient.startDownload(downloadData);
+      const result = await this.apiClient.startDownload(downloadData) as { success?: boolean; id?: string; error?: string };
 
       if (result.success || result.id) {
         this.uiManager.showNotification('Download started successfully', 'success');
@@ -73,7 +165,8 @@ export class DownloadManager {
       } else {
         throw new Error(result.error || 'Unknown error');
       }
-    } catch (error) {
+    } catch (caught) {
+      const error = toError(caught);
       if (error.code === 'ALREADY_DOWNLOADED' || error.code === 'ALREADY_PROCESSING') {
         this.uiManager.showNotification(error.message, 'info');
       } else {
@@ -85,9 +178,10 @@ export class DownloadManager {
     }
   }
 
-  async handlePlaylistDownload(event) {
+  async handlePlaylistDownload(event: Event): Promise<void> {
+    if (!(event instanceof CustomEvent)) return;
     const { type } = event.detail;
-    const formData = this.uiManager.getFormData('download-form');
+    const formData = this.uiManager.getFormData('download-form') as DownloadFormData | null;
 
     if (!formData || !formData.url) {
       this.uiManager.showNotification('Please enter a valid URL', 'warning');
@@ -129,14 +223,15 @@ export class DownloadManager {
       await this.uiManager.resetForm('download-form');
       this.uiManager.clearUrlValidation(); // Hide playlist options after successful start
       this.refreshDownloads(); // Non-blocking refresh
-    } catch (error) {
+    } catch (caught) {
+      const error = toError(caught);
       this.uiManager.showNotification(`Failed to start download: ${error.message}`, 'error');
     } finally {
       this.resetPlaylistButtons();
     }
   }
 
-  resetPlaylistButtons() {
+  resetPlaylistButtons(): void {
     // Reset both playlist buttons to their original state
     this.uiManager.setLoading('download-playlist', false);
     this.uiManager.setLoading('download-first-video', false);
@@ -144,11 +239,11 @@ export class DownloadManager {
     const playlistButton = document.getElementById('download-playlist');
     const firstVideoButton = document.getElementById('download-first-video');
 
-    if (playlistButton) playlistButton.disabled = false;
-    if (firstVideoButton) firstVideoButton.disabled = false;
+    if (playlistButton instanceof HTMLButtonElement) playlistButton.disabled = false;
+    if (firstVideoButton instanceof HTMLButtonElement) firstVideoButton.disabled = false;
   }
 
-  async handleDownloadAction(action, downloadId, buttonElement) {
+  async handleDownloadAction(action: DownloadAction, downloadId: string, buttonElement: HTMLButtonElement): Promise<void> {
     if (action === 'play') {
       this.openMediaPlayer(downloadId);
       return;
@@ -186,7 +281,7 @@ export class DownloadManager {
           await this.apiClient.removeDownload(downloadId);
           this.uiManager.showNotification('Download removed', 'info');
           // For remove action, immediately hide the item for better UX
-          const itemElement = buttonElement.closest('.download-item');
+          const itemElement = buttonElement.closest<HTMLElement>('.download-item');
           if (itemElement) {
             itemElement.style.opacity = '0.5';
             itemElement.style.pointerEvents = 'none';
@@ -205,7 +300,8 @@ export class DownloadManager {
         default:
           throw new Error('Unknown action');
       }
-    } catch (error) {
+    } catch (caught) {
+      const error = toError(caught);
       this.uiManager.showNotification(`Action failed: ${error.message}`, 'error');
     } finally {
       buttonElement.disabled = false;
@@ -213,10 +309,10 @@ export class DownloadManager {
     }
   }
 
-  async refreshDownloads() {
+  async refreshDownloads(): Promise<void> {
     try {
       const downloads = await this.apiClient.getDownloads();
-      const newDownloads = downloads || [];
+      const newDownloads = Array.isArray(downloads) ? downloads as Download[] : [];
 
       // Quick check if data has changed at all
       if (this.hasDownloadsChanged(newDownloads)) {
@@ -231,7 +327,7 @@ export class DownloadManager {
   }
 
   // Check if the downloads data has changed
-  hasDownloadsChanged(newDownloads) {
+  hasDownloadsChanged(newDownloads: Download[]): boolean {
     if (this.downloads.length !== newDownloads.length) {
       return true;
     }
@@ -243,9 +339,9 @@ export class DownloadManager {
     return oldHash !== newHash;
   }
 
-  categorizeDownloads() {
+  categorizeDownloads(): void {
     // Reset sections
-    Object.keys(this.sections).forEach(key => {
+    (Object.keys(this.sections) as SectionKey[]).forEach(key => {
       this.sections[key].downloads = [];
     });
 
@@ -275,13 +371,13 @@ export class DownloadManager {
     });
 
     // Sort downloads within each section
-    Object.keys(this.sections).forEach(key => {
+    (Object.keys(this.sections) as SectionKey[]).forEach(key => {
       this.sections[key].downloads.sort(this.getSortFunction(key));
     });
   }
 
   // Create a hash for a download to detect changes
-  createDownloadHash(download) {
+  createDownloadHash(download: Download | null | undefined): string {
     if (!download) return '';
     // Include key fields but round percentage to avoid minor floating point differences
     const progressPhase = download.progress?.phase || '';
@@ -289,7 +385,7 @@ export class DownloadManager {
     const progressETA = download.progress?.eta || '';
     const progressSpeed = download.progress?.speed || '';
     // Round percentage to 1 decimal place to allow gradual updates while avoiding micro-changes
-    const roundedPercentage = Math.round((download.progress?.percentage || 0) * 10) / 10;
+    const roundedPercentage = Math.round(this.parsePercentage(download.progress?.percentage) * 10) / 10;
     // file_size and codecs land asynchronously after a download completes (stat
     // + probe), so they must be in the hash or the card never repaints to show
     // the final size / codec badge / convert action.
@@ -298,7 +394,7 @@ export class DownloadManager {
     return key;
   }
 
-  getSortFunction(sectionKey) {
+  getSortFunction(sectionKey: SectionKey): (a: Download, b: Download) => number {
     return (a, b) => {
       let aDate, bDate;
 
@@ -307,26 +403,26 @@ export class DownloadManager {
           aDate = new Date(a.created_at);
           bDate = new Date(b.created_at);
           // Primary sort: oldest first, secondary sort: by ID for stability
-          const queueResult = aDate - bDate;
+          const queueResult = aDate.getTime() - bDate.getTime();
           return queueResult !== 0 ? queueResult : a.id.localeCompare(b.id);
         case 'downloading':
         case 'processing':
           aDate = new Date(a.started_at || a.created_at);
           bDate = new Date(b.started_at || b.created_at);
           // Primary sort: newest first, secondary sort: by ID for stability
-          const activeResult = bDate - aDate;
+          const activeResult = bDate.getTime() - aDate.getTime();
           return activeResult !== 0 ? activeResult : a.id.localeCompare(b.id);
         case 'completed':
           aDate = new Date(a.completed_at || a.created_at);
           bDate = new Date(b.completed_at || b.created_at);
           // Primary sort: newest first, secondary sort: by ID for stability
-          const completedResult = bDate - aDate;
+          const completedResult = bDate.getTime() - aDate.getTime();
           return completedResult !== 0 ? completedResult : a.id.localeCompare(b.id);
         case 'failed':
           aDate = new Date(a.error_at || a.created_at);
           bDate = new Date(b.error_at || b.created_at);
           // Primary sort: newest first, secondary sort: by ID for stability
-          const failedResult = bDate - aDate;
+          const failedResult = bDate.getTime() - aDate.getTime();
           return failedResult !== 0 ? failedResult : a.id.localeCompare(b.id);
         default:
           // Fallback to ID-based sorting for any unknown sections
@@ -335,8 +431,8 @@ export class DownloadManager {
     };
   }
 
-  renderDownloads() {
-    Object.entries(this.sections).forEach(([sectionKey, section]) => {
+  renderDownloads(): void {
+    (Object.entries(this.sections) as Array<[SectionKey, Section]>).forEach(([sectionKey, section]) => {
       this.renderSection(sectionKey, section);
     });
 
@@ -351,7 +447,7 @@ export class DownloadManager {
     this.uiManager.updateConnectionStatus(true);
   }
 
-  renderSection(sectionKey, section) {
+  renderSection(sectionKey: SectionKey, section: Section): void {
     const container = document.getElementById(`${sectionKey}-content`);
     if (!container) return;
 
@@ -432,7 +528,7 @@ export class DownloadManager {
   // DOM, preserving the progress bar's width transition and the indeterminate
   // slide animation. Returns false if the card has no progress block to patch
   // (terminal states), so the caller falls back to a full replace.
-  updateItemInPlace(el, download, sectionKey, index) {
+  updateItemInPlace(el: Element, download: Download, sectionKey: SectionKey, index: number): boolean {
     const progressEl = el.querySelector('.download-progress');
     if (!progressEl) return false;
 
@@ -450,12 +546,12 @@ export class DownloadManager {
     if (containerEl) containerEl.classList.toggle('progress-indeterminate', !!stage.indeterminate);
 
     const barEl = progressEl.querySelector('.progress-bar');
-    if (barEl) barEl.style.width = `${stage.indeterminate ? 30 : bounded}%`;
+    if (barEl instanceof HTMLElement) barEl.style.width = `${stage.indeterminate ? 30 : bounded}%`;
 
     return true;
   }
 
-  renderDownloadItem(download, sectionKey, index = 0) {
+  renderDownloadItem(download: Download, sectionKey: SectionKey, index = 0): string {
     const progress = download.progress || {};
     const percentage = this.parsePercentage(progress.percentage);
 
@@ -486,13 +582,13 @@ export class DownloadManager {
   }
 
   // Shows the final file size on completed entries, e.g. "1.2 GB".
-  renderFileSize(download) {
+  renderFileSize(download: Download): string {
     const terminal = ['completed', 'already_exists'];
     if (!terminal.includes(download.status) || !download.file_size) return '';
     return `<span class="text-sm text-secondary">[${this.formatBytes(download.file_size)}]</span>`;
   }
 
-  formatBytes(bytes) {
+  formatBytes(bytes: number | string): string {
     const b = Number(bytes);
     if (!b || b < 0) return '';
     const unit = 1024;
@@ -503,7 +599,7 @@ export class DownloadManager {
     return `${(b / Math.pow(unit, exp)).toFixed(1)} ${units[exp - 1]}`;
   }
 
-  renderStatusBadge(status) {
+  renderStatusBadge(status: string): string {
     const statusConfig = {
       queued: { class: 'badge-secondary', icon: 'clock', text: 'Queued' },
       downloading: { class: 'badge-primary', icon: 'download', text: 'Downloading' },
@@ -518,7 +614,7 @@ export class DownloadManager {
       cancelled: { class: 'badge-secondary', icon: 'x-circle', text: 'Cancelled' }
     };
 
-    const config = statusConfig[status] || statusConfig.queued;
+    const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.queued;
     return `
       <span class="badge ${config.class}">
         ${icon(config.icon, 'icon-xs')}
@@ -529,20 +625,20 @@ export class DownloadManager {
 
   // Shows the file's actual codecs once probed, e.g. "H.264 · AAC" or
   // "VP9 · Opus". Absent for downloads completed before codec probing existed.
-  renderCodecBadge(download) {
+  renderCodecBadge(download: Download): string {
     const v = download.video_codec;
     const a = download.audio_codec;
     if (!v && !a) return '';
-    const pretty = (c) => {
+    const pretty = (c: string | undefined): string => {
       if (!c) return '';
       const map = { h264: 'H.264', hevc: 'HEVC', aac: 'AAC', vp9: 'VP9', vp8: 'VP8', av1: 'AV1', opus: 'Opus', vorbis: 'Vorbis' };
-      return map[c.toLowerCase()] || c.toUpperCase();
+      return map[c.toLowerCase() as keyof typeof map] || c.toUpperCase();
     };
     const parts = [pretty(v), pretty(a)].filter(Boolean).join(' ');
     return `<span class="text-sm text-secondary">${this.escapeHtml(parts)}</span>`;
   }
 
-  renderProgress(download, percentage, sectionKey, index = 0) {
+  renderProgress(download: Download, percentage: number, sectionKey: SectionKey, index = 0): string {
     const terminal = ['completed', 'already_exists', 'failed', 'error', 'cancelled', 'canceled'];
     if (terminal.includes(download.status)) {
       return '';
@@ -553,7 +649,7 @@ export class DownloadManager {
     const stage = this.getStageInfo(download, boundedPercentage, sectionKey, index);
 
     let ffmpegProgressHtml = '';
-    if (progress.phase || progress.ffmpeg_progress || progress.video_codec || progress.current_frame > 0) {
+    if (progress.phase || progress.ffmpeg_progress || progress.video_codec || (progress.current_frame ?? 0) > 0) {
       ffmpegProgressHtml = this.renderFFMPEGProgress(progress);
     }
 
@@ -575,9 +671,9 @@ export class DownloadManager {
 
   // Builds the right-hand stats line (percent of size, speed, eta). Shared by
   // the full render and the in-place patch so both stay identical.
-  buildProgressStats(download, boundedPercentage, stage) {
+  buildProgressStats(download: Download, boundedPercentage: number, stage: StageInfo): string {
     const progress = download.progress || {};
-    const stats = [];
+    const stats: string[] = [];
     if (stage.showPercent) {
       const sizeSuffix = (download.status === 'downloading' && progress.size)
         ? ` of ${this.escapeHtml(progress.size)}`
@@ -595,7 +691,7 @@ export class DownloadManager {
 
   // Stage drives the always-on feedback line: what the system is doing with
   // this entry right now, in plain words.
-  getStageInfo(download, percentage, sectionKey, index) {
+  getStageInfo(download: Download, percentage: number, _sectionKey: SectionKey, index: number): StageInfo {
     const phase = download.progress?.phase;
 
     if (download.status === 'queued') {
@@ -619,20 +715,20 @@ export class DownloadManager {
     return { label: this.formatPhase(phase || download.status), indeterminate: percentage <= 0, showPercent: percentage > 0 };
   }
 
-  formatPhase(phase) {
+  formatPhase(phase: string): string {
     const phaseMap = {
       'initializing': 'Initializing',
       'downloading': 'Downloading',
       'processing': 'Processing',
       'converting': 'Converting'
     };
-    return phaseMap[phase] || phase;
+    return phaseMap[phase as keyof typeof phaseMap] || phase;
   }
 
-  renderFFMPEGProgress(progress) {
+  renderFFMPEGProgress(progress: DownloadProgress): string {
     if (!progress || Object.keys(progress).length === 0) return '';
 
-    const sections = [];
+    const sections: string[] = [];
 
     // FFMPEG Progress Section
     if (progress.ffmpeg_progress) {
@@ -651,7 +747,7 @@ export class DownloadManager {
 
     // Media Information Section
     if (progress.video_codec || progress.audio_codec || progress.resolution) {
-      const mediaDetails = [];
+      const mediaDetails: Array<{ label: string; value: string | number }> = [];
       if (progress.video_codec) mediaDetails.push({ label: 'Video Codec', value: progress.video_codec });
       if (progress.audio_codec) mediaDetails.push({ label: 'Audio Codec', value: progress.audio_codec });
       if (progress.resolution) mediaDetails.push({ label: 'Resolution', value: progress.resolution });
@@ -682,19 +778,21 @@ export class DownloadManager {
     }
 
     // Processing Details Section
-    if (progress.current_frame > 0 || progress.bitrate || progress.processing_time) {
-      const processingDetails = [];
+    const currentFrame = progress.current_frame ?? 0;
+    const totalFrames = progress.total_frames ?? 0;
+    if (currentFrame > 0 || progress.bitrate || progress.processing_time) {
+      const processingDetails: Array<{ label: string; value: string }> = [];
 
-      if (progress.current_frame > 0) {
-        if (progress.total_frames > 0) {
+      if (currentFrame > 0) {
+        if (totalFrames > 0) {
           processingDetails.push({
             label: 'Frame Progress',
-            value: `${progress.current_frame.toLocaleString()} / ${progress.total_frames.toLocaleString()}`
+            value: `${currentFrame.toLocaleString()} / ${totalFrames.toLocaleString()}`
           });
         } else {
           processingDetails.push({
             label: 'Current Frame',
-            value: progress.current_frame.toLocaleString()
+            value: currentFrame.toLocaleString()
           });
         }
       }
@@ -729,14 +827,14 @@ export class DownloadManager {
     return sections.join('');
   }
 
-  openMediaPlayer(downloadId) {
+  openMediaPlayer(downloadId: string): void {
     const download = this.downloads.find(d => d.id === downloadId);
     if (!download) return;
 
     const modal = document.getElementById('media-player-modal');
     const mount = document.getElementById('media-modal-mount');
     const title = document.getElementById('media-modal-title');
-    if (!modal || !mount || !title) return;
+    if (!(modal instanceof HTMLDialogElement) || !mount || !title) return;
 
     title.textContent = download.title || download.filename || 'Media';
 
@@ -762,15 +860,15 @@ export class DownloadManager {
     modal.showModal();
   }
 
-  closeMediaPlayer() {
+  closeMediaPlayer(): void {
     const modal = document.getElementById('media-player-modal');
-    if (modal && modal.open) modal.close();
+    if (modal instanceof HTMLDialogElement && modal.open) modal.close();
   }
 
-  teardownMediaPlayer() {
+  teardownMediaPlayer(): void {
     const mount = document.getElementById('media-modal-mount');
     const media = mount?.querySelector('video, audio');
-    if (media) {
+    if (media instanceof HTMLMediaElement) {
       media.pause();
       media.removeAttribute('src');
       media.load();
@@ -778,7 +876,7 @@ export class DownloadManager {
     if (mount) mount.replaceChildren();
   }
 
-  renderDownloadActions(download, sectionKey) {
+  renderDownloadActions(download: Download, _sectionKey: SectionKey): string {
     const actions = this.getAvailableActions(download.status)
       .filter(action => action !== 'convert' || this.canConvert(download));
     if (actions.length === 0) return '';
@@ -802,8 +900,8 @@ export class DownloadManager {
     return `<div class="download-actions">${buttonsHtml}</div>`;
   }
 
-  getAvailableActions(status) {
-    const actionMap = {
+  getAvailableActions(status: string): DownloadAction[] {
+    const actionMap: Record<string, DownloadAction[]> = {
       queued: ['cancel', 'remove'],
       downloading: ['pause', 'cancel'],
       'post-processing': ['cancel'],
@@ -821,7 +919,7 @@ export class DownloadManager {
 
   // Convert is offered only for completed videos that are not already H.264+AAC
   // and have not been converted yet.
-  canConvert(download) {
+  canConvert(download: Download): boolean {
     if (download.type !== 'video') return false;
     if (download.converted) return false;
     const v = (download.video_codec || '').toLowerCase();
@@ -829,7 +927,7 @@ export class DownloadManager {
     return !(v === 'h264' && a === 'aac');
   }
 
-  getActionConfig(action) {
+  getActionConfig(action: DownloadAction): { class: string; icon: string; text: string; title: string } {
     const configs = {
       cancel: { class: 'btn-warning', icon: 'x-circle', text: 'Cancel', title: 'Cancel download' },
       pause: { class: 'btn-secondary', icon: 'pause', text: 'Pause', title: 'Pause download' },
@@ -846,11 +944,11 @@ export class DownloadManager {
 
   // Bulk operations. These act immediately without a confirm dialog; an
   // informational banner reports when there is nothing matching to act on.
-  countByStatus(...statuses) {
+  countByStatus(...statuses: string[]): number {
     return this.downloads.filter(d => statuses.includes(d.status)).length;
   }
 
-  async clearQueuedDownloads() {
+  async clearQueuedDownloads(): Promise<void> {
     if (this.countByStatus('queued') === 0) {
       this.uiManager.showNotification('Nothing to clear', 'info');
       return;
@@ -859,12 +957,13 @@ export class DownloadManager {
       await this.apiClient.clearQueuedDownloads();
       this.uiManager.showNotification('Queued downloads cleared', 'success');
       await this.refreshDownloads();
-    } catch (error) {
+    } catch (caught) {
+      const error = toError(caught);
       this.uiManager.showNotification(`Failed to clear queued downloads: ${error.message}`, 'error');
     }
   }
 
-  async deleteCompletedDownloads() {
+  async deleteCompletedDownloads(): Promise<void> {
     if (this.countByStatus('completed', 'already_exists') === 0) {
       this.uiManager.showNotification('Nothing to remove', 'info');
       return;
@@ -873,12 +972,13 @@ export class DownloadManager {
       await this.apiClient.deleteCompletedDownloads();
       this.uiManager.showNotification('Completed downloads deleted', 'success');
       await this.refreshDownloads();
-    } catch (error) {
+    } catch (caught) {
+      const error = toError(caught);
       this.uiManager.showNotification(`Failed to delete completed downloads: ${error.message}`, 'error');
     }
   }
 
-  async clearFailedDownloads() {
+  async clearFailedDownloads(): Promise<void> {
     if (this.countByStatus('failed', 'error') === 0) {
       this.uiManager.showNotification('Nothing to clear', 'info');
       return;
@@ -887,19 +987,20 @@ export class DownloadManager {
       await this.apiClient.clearFailedDownloads();
       this.uiManager.showNotification('Failed downloads cleared', 'success');
       await this.refreshDownloads();
-    } catch (error) {
+    } catch (caught) {
+      const error = toError(caught);
       this.uiManager.showNotification(`Failed to clear failed downloads: ${error.message}`, 'error');
     }
   }
 
   // Utility methods
-  parsePercentage(percentageStr) {
+  parsePercentage(percentageStr: number | string | null | undefined): number {
     if (!percentageStr) return 0;
     const num = parseFloat(percentageStr.toString().replace('%', ''));
     return isNaN(num) ? 0 : Math.max(0, Math.min(100, num));
   }
 
-  getRelevantDate(download, sectionKey) {
+  getRelevantDate(download: Download, sectionKey: SectionKey): string {
     switch (sectionKey) {
       case 'completed':
         return download.completed_at || download.created_at;
@@ -913,18 +1014,18 @@ export class DownloadManager {
     }
   }
 
-  escapeHtml(text) {
+  escapeHtml(text: string | number | null | undefined): string {
     const div = document.createElement('div');
-    div.textContent = text;
+    div.textContent = text == null ? '' : String(text);
     return div.innerHTML;
   }
 
-  getDownloadsCount() {
+  getDownloadsCount(): number {
     return this.downloads.length;
   }
 
   // Cleanup
-  cleanup() {
+  cleanup(): void {
     // Any cleanup needed for the download manager
   }
 }

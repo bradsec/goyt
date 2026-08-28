@@ -1,4 +1,3 @@
-// @ts-nocheck -- Legacy controller; strict migration is tracked separately.
 /**
  * goyt - Main Application Module
  * Modern vanilla JavaScript with ES6 modules
@@ -8,18 +7,44 @@ import { DownloadManager } from './modules/download-manager.js';
 import { SettingsManager } from './modules/settings-manager.js';
 import { UIManager } from './modules/ui-manager.js';
 import { ApiClient } from './modules/api-client.js';
+
+declare global {
+  interface Window {
+    goytApp: goytApp;
+  }
+}
+
+type DownloadType = 'video' | 'audio';
+
+interface TypeChangeEvent {
+  target: HTMLSelectElement;
+}
+
+interface AppSettings {
+  default_video_format?: string;
+  default_audio_format?: string;
+  default_video_quality?: string;
+}
+
 class goytApp {
+  apiClient: ApiClient;
+  uiManager: UIManager;
+  downloadManager: DownloadManager;
+  settingsManager: SettingsManager & { settings: AppSettings };
+  pollInterval: ReturnType<typeof setInterval> | null;
+  isInitialized: boolean;
+
   constructor() {
     this.apiClient = new ApiClient();
-    this.uiManager = new UIManager(this.apiClient);
+    this.uiManager = new UIManager(this.apiClient as never);
     this.downloadManager = new DownloadManager(this.apiClient, this.uiManager);
-    this.settingsManager = new SettingsManager(this.apiClient, this.uiManager);
+    this.settingsManager = new SettingsManager(this.apiClient, this.uiManager) as SettingsManager & { settings: AppSettings };
 
     this.pollInterval = null;
     this.isInitialized = false;
   }
 
-  async init() {
+  async init(): Promise<void> {
     try {
       console.log('Initializing goyt application...');
 
@@ -48,40 +73,40 @@ class goytApp {
     }
   }
 
-  setupEventListeners() {
+  setupEventListeners(): void {
     // Form submission
-    const downloadForm = document.getElementById('download-form');
+    const downloadForm = document.getElementById('download-form') as HTMLFormElement | null;
     if (downloadForm) {
       downloadForm.addEventListener('submit', this.handleDownloadSubmit.bind(this));
     }
 
     // Initialize submit button as disabled
-    const submitButton = document.getElementById('submit-button');
+    const submitButton = document.getElementById('submit-button') as HTMLButtonElement | null;
     if (submitButton) {
       submitButton.disabled = true;
     }
 
     // URL input validation
-    const urlInput = document.getElementById('url-input');
+    const urlInput = document.getElementById('url-input') as HTMLInputElement | null;
     if (urlInput) {
-      let validationTimeout;
-      urlInput.addEventListener('input', (e) => {
+      let validationTimeout: ReturnType<typeof setTimeout> | undefined;
+      urlInput.addEventListener('input', () => {
         clearTimeout(validationTimeout);
-        const submitBtn = document.getElementById('submit-button');
+        const submitBtn = document.getElementById('submit-button') as HTMLButtonElement | null;
         if (submitBtn) {
           submitBtn.disabled = true; // Disable while validating
         }
 
         validationTimeout = setTimeout(() => {
-          this.handleUrlValidation(e.target.value);
+          this.handleUrlValidation(urlInput.value);
         }, 500);
       });
     }
 
     // Type selector change
-    const typeSelect = document.getElementById('type-select');
+    const typeSelect = document.getElementById('type-select') as HTMLSelectElement | null;
     if (typeSelect) {
-      typeSelect.addEventListener('change', this.handleTypeChange.bind(this));
+      typeSelect.addEventListener('change', () => this.handleTypeChange({ target: typeSelect }));
       // Initialize on page load
       this.handleTypeChange({ target: typeSelect });
     }
@@ -104,15 +129,22 @@ class goytApp {
     window.addEventListener('beforeunload', this.cleanup.bind(this));
   }
 
-  async handleDownloadSubmit(event) {
+  async handleDownloadSubmit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
 
-    const formData = new FormData(event.target);
+    const form = event.currentTarget;
+    if (!(form instanceof HTMLFormElement)) return;
+
+    const formData = new FormData(form);
+    const urlValue = formData.get('url');
+    const typeValue = formData.get('type');
+    const qualityValue = formData.get('quality');
+    const formatValue = formData.get('format');
     const downloadData = {
-      url: formData.get('url')?.trim(),
-      type: formData.get('type') || 'video',
-      quality: formData.get('quality') || 'best',
-      format: formData.get('format') || 'mp4'
+      url: typeof urlValue === 'string' ? urlValue.trim() : '',
+      type: typeof typeValue === 'string' && typeValue ? typeValue : 'video',
+      quality: typeof qualityValue === 'string' && qualityValue ? qualityValue : 'best',
+      format: typeof formatValue === 'string' && formatValue ? formatValue : 'mp4'
     };
 
     if (!downloadData.url) {
@@ -122,7 +154,7 @@ class goytApp {
 
     try {
       await this.downloadManager.startDownload(downloadData);
-      event.target.reset();
+      form.reset();
       this.uiManager.clearUrlValidation();
     } catch (error) {
       console.error('Download submission failed:', error);
@@ -130,8 +162,8 @@ class goytApp {
     }
   }
 
-  async handleUrlValidation(url) {
-    const submitButton = document.getElementById('submit-button');
+  async handleUrlValidation(url: string): Promise<void> {
+    const submitButton = document.getElementById('submit-button') as HTMLButtonElement | null;
 
     if (!url || url.length < 10) {
       this.uiManager.clearUrlValidation();
@@ -169,7 +201,7 @@ class goytApp {
       // links, where playlist enumeration can be slow), tell the user instead
       // of clearing the panel silently, and allow the download attempt anyway
       // (the server validates the request again).
-      const message = error.message === 'Request timed out'
+      const message = error instanceof Error && error.message === 'Request timed out'
         ? 'Validation timed out (slow network). You can still try the download.'
         : 'Could not validate the URL. You can still try the download.';
       this.uiManager.showUrlValidationWarning(message);
@@ -179,10 +211,10 @@ class goytApp {
     }
   }
 
-  handleTypeChange(event) {
-    const selectedType = event.target.value;
-    const qualityGroup = document.querySelector('#quality-select').closest('.form-group');
-    const formatSelect = document.getElementById('format-select');
+  handleTypeChange(event: TypeChangeEvent): void {
+    const selectedType: DownloadType = event.target.value === 'audio' ? 'audio' : 'video';
+    const qualityGroup = document.querySelector<HTMLElement>('#quality-select')?.closest<HTMLElement>('.form-group');
+    const formatSelect = document.getElementById('format-select') as HTMLSelectElement | null;
 
     // Define format options for each type
     const formats = {
@@ -235,14 +267,14 @@ class goytApp {
       if (selectedType === 'audio') {
         qualityGroup.style.display = 'none';
         // Set quality to best for audio downloads
-        const qualitySelect = document.getElementById('quality-select');
+        const qualitySelect = document.getElementById('quality-select') as HTMLSelectElement | null;
         if (qualitySelect) {
           qualitySelect.value = 'best';
         }
       } else {
         qualityGroup.style.display = 'block';
         // Apply default video quality from settings
-        const qualitySelect = document.getElementById('quality-select');
+        const qualitySelect = document.getElementById('quality-select') as HTMLSelectElement | null;
         const settings = this.settingsManager.settings;
         if (qualitySelect && settings?.default_video_quality) {
           qualitySelect.value = settings.default_video_quality;
@@ -263,11 +295,11 @@ class goytApp {
     }
   }
 
-  handleKeyboardShortcuts(event) {
+  handleKeyboardShortcuts(event: KeyboardEvent): void {
     // Ctrl/Cmd + K to focus search
     if ((event.ctrlKey || event.metaKey) && event.key === 'k') {
       event.preventDefault();
-      const urlInput = document.getElementById('url-input');
+      const urlInput = document.getElementById('url-input') as HTMLInputElement | null;
       if (urlInput) {
         urlInput.focus();
         urlInput.select();
@@ -286,7 +318,7 @@ class goytApp {
     }
   }
 
-  handleVisibilityChange() {
+  handleVisibilityChange(): void {
     if (document.hidden) {
       this.stopPolling();
     } else {
@@ -294,7 +326,7 @@ class goytApp {
     }
   }
 
-  startPolling() {
+  startPolling(): void {
     if (this.pollInterval) {
       clearInterval(this.pollInterval);
     }
@@ -308,14 +340,14 @@ class goytApp {
     }, 2000); // More frequent updates for better progress visibility
   }
 
-  stopPolling() {
+  stopPolling(): void {
     if (this.pollInterval) {
       clearInterval(this.pollInterval);
       this.pollInterval = null;
     }
   }
 
-  async loadInitialData() {
+  async loadInitialData(): Promise<void> {
     try {
       // Load downloads
       await this.downloadManager.refreshDownloads();
@@ -334,25 +366,25 @@ class goytApp {
     }
   }
 
-  applySettingsToForm() {
+  applySettingsToForm(): void {
     // Apply default settings to the download form
     const settings = this.settingsManager.settings;
     if (!settings) return;
 
     // Set default video format
-    const formatSelect = document.getElementById('format-select');
+    const formatSelect = document.getElementById('format-select') as HTMLSelectElement | null;
     if (formatSelect && settings.default_video_format) {
       formatSelect.value = settings.default_video_format;
     }
 
     // Set default video quality
-    const qualitySelect = document.getElementById('quality-select');
+    const qualitySelect = document.getElementById('quality-select') as HTMLSelectElement | null;
     if (qualitySelect && settings.default_video_quality) {
       qualitySelect.value = settings.default_video_quality;
     }
   }
 
-  cleanup() {
+  cleanup(): void {
     this.stopPolling();
     this.downloadManager.cleanup();
     this.settingsManager.cleanup();
@@ -360,11 +392,11 @@ class goytApp {
   }
 
   // Public API methods
-  async refreshAll() {
+  async refreshAll(): Promise<void> {
     await this.loadInitialData();
   }
 
-  getStatus() {
+  getStatus(): { initialized: boolean; polling: boolean; downloadsCount: number } {
     return {
       initialized: this.isInitialized,
       polling: !!this.pollInterval,
@@ -380,7 +412,7 @@ if (document.readyState === 'loading') {
   initApp();
 }
 
-function initApp() {
+function initApp(): void {
   window.goytApp = new goytApp();
   window.goytApp.init().catch(error => {
     console.error('Failed to initialize goyt:', error);

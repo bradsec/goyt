@@ -1,10 +1,21 @@
-// @ts-nocheck -- Legacy DOM utility; strict migration is tracked separately.
 /**
  * UI Manager Module
  * Handles all UI interactions and DOM manipulation
  */
 import { icon } from './icons.js';
+function isRecord(value) {
+    return typeof value === 'object' && value !== null;
+}
+function stringProperty(value, property) {
+    if (!isRecord(value))
+        return undefined;
+    const propertyValue = value[property];
+    return typeof propertyValue === 'string' ? propertyValue : undefined;
+}
 export class UIManager {
+    apiClient;
+    notifications;
+    accordionStates;
     constructor(apiClient = null) {
         this.apiClient = apiClient;
         this.notifications = [];
@@ -18,7 +29,7 @@ export class UIManager {
     }
     escapeHtml(text) {
         const div = document.createElement('div');
-        div.textContent = text ?? '';
+        div.textContent = text == null ? '' : String(text);
         return div.innerHTML;
     }
     init() {
@@ -31,8 +42,10 @@ export class UIManager {
         // Handle type selector change to update format options
         const typeSelect = document.querySelector('#type-select');
         if (typeSelect) {
-            typeSelect.addEventListener('change', (e) => {
-                this.updateFormatOptions(e.target.value);
+            typeSelect.addEventListener('change', (event) => {
+                if (event.target instanceof HTMLSelectElement) {
+                    this.updateFormatOptions(event.target.value);
+                }
             });
         }
     }
@@ -72,13 +85,13 @@ export class UIManager {
     `;
         // Add close functionality
         const closeBtn = notification.querySelector('.btn-close');
-        closeBtn.addEventListener('click', () => this.removeNotification(notification));
+        closeBtn?.addEventListener('click', () => this.removeNotification(notification));
         // Auto remove after duration
         if (duration > 0) {
             setTimeout(() => this.removeNotification(notification), duration);
         }
         const container = document.getElementById('notification-container');
-        container.appendChild(notification);
+        container?.appendChild(notification);
         this.notifications.push(notification);
     }
     removeNotification(notification) {
@@ -97,7 +110,7 @@ export class UIManager {
             warning: 'alert-triangle',
             info: 'info'
         };
-        return icons[type] || icons.info;
+        return icons[type];
     }
     // Connection status
     updateConnectionStatus(isConnected) {
@@ -208,8 +221,8 @@ export class UIManager {
     }
     triggerPlaylistDownload(type) {
         // Immediately disable buttons and show loading state
-        const playlistButton = document.getElementById('download-playlist');
-        const firstVideoButton = document.getElementById('download-first-video');
+        const playlistButton = document.querySelector('#download-playlist');
+        const firstVideoButton = document.querySelector('#download-first-video');
         if (type === 'playlist' && playlistButton) {
             this.setLoading('download-playlist', true, 'Processing Playlist...');
         }
@@ -228,18 +241,22 @@ export class UIManager {
     }
     // Accordion functionality
     setupAccordions() {
-        document.addEventListener('click', (e) => {
-            const header = e.target.closest('.section-header');
+        document.addEventListener('click', (event) => {
+            if (!(event.target instanceof Element))
+                return;
+            const header = event.target.closest('.section-header');
             if (header?.dataset.section) {
                 this.toggleAccordion(header.dataset.section);
             }
         });
-        document.addEventListener('keydown', (e) => {
-            if (e.key !== 'Enter' && e.key !== ' ')
+        document.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ')
                 return;
-            const header = e.target.closest?.('.section-header');
+            if (!(event.target instanceof Element))
+                return;
+            const header = event.target.closest('.section-header');
             if (header?.dataset.section) {
-                e.preventDefault();
+                event.preventDefault();
                 this.toggleAccordion(header.dataset.section);
             }
         });
@@ -247,10 +264,11 @@ export class UIManager {
     toggleAccordion(sectionId) {
         const content = document.getElementById(`${sectionId}-content`);
         const header = document.querySelector(`[data-section="${sectionId}"]`);
-        if (!content)
+        if (!content || !(sectionId in this.accordionStates))
             return;
-        const isExpanded = this.accordionStates[sectionId];
-        this.accordionStates[sectionId] = !isExpanded;
+        const section = sectionId;
+        const isExpanded = this.accordionStates[section];
+        this.accordionStates[section] = !isExpanded;
         content.classList.toggle('section-collapsed', isExpanded);
         content.classList.toggle('section-expanded', !isExpanded);
         header?.setAttribute('aria-expanded', String(!isExpanded));
@@ -278,7 +296,7 @@ export class UIManager {
     // Form helpers
     getFormData(formId) {
         const form = document.getElementById(formId);
-        if (!form)
+        if (!(form instanceof HTMLFormElement))
             return null;
         const formData = new FormData(form);
         const data = {};
@@ -289,23 +307,26 @@ export class UIManager {
     }
     setFormData(formId, data) {
         const form = document.getElementById(formId);
-        if (!form)
+        if (!(form instanceof HTMLFormElement))
             return;
         Object.entries(data).forEach(([key, value]) => {
-            const element = form.elements[key];
-            if (element) {
-                if (element.type === 'checkbox') {
-                    element.checked = Boolean(value);
-                }
-                else {
-                    element.value = value;
-                }
+            const element = form.elements.namedItem(key);
+            if (element instanceof HTMLInputElement && element.type === 'checkbox') {
+                element.checked = Boolean(value);
+            }
+            else if (element instanceof HTMLInputElement ||
+                element instanceof HTMLSelectElement ||
+                element instanceof HTMLTextAreaElement) {
+                element.value = value == null ? '' : String(value);
+            }
+            else if (element instanceof RadioNodeList) {
+                element.value = value == null ? '' : String(value);
             }
         });
     }
     async resetForm(formId) {
         const form = document.getElementById(formId);
-        if (!form)
+        if (!(form instanceof HTMLFormElement))
             return;
         // Clear the URL field and validation
         const urlInput = form.querySelector('#url-input');
@@ -325,12 +346,12 @@ export class UIManager {
                     typeSelect.value = 'video'; // Always default to video
                 }
                 if (qualitySelect) {
-                    qualitySelect.value = config.default_video_quality || '1080p';
+                    qualitySelect.value = stringProperty(config, 'default_video_quality') || '1080p';
                 }
                 if (formatSelect) {
                     // Update format options first based on type
                     this.updateFormatOptions('video');
-                    formatSelect.value = config.default_video_format || 'mp4';
+                    formatSelect.value = stringProperty(config, 'default_video_format') || 'mp4';
                 }
             }
             catch (error) {
@@ -397,7 +418,7 @@ export class UIManager {
     // Loading states
     setLoading(elementId, isLoading, loadingText = 'Loading...') {
         const element = document.getElementById(elementId);
-        if (!element)
+        if (!(element instanceof HTMLButtonElement))
             return;
         if (isLoading) {
             element.disabled = true;
@@ -431,12 +452,12 @@ export class UIManager {
     }
     // Utility methods
     formatFileSize(bytes) {
-        if (bytes === 0)
+        if (!Number.isFinite(bytes) || bytes <= 0)
             return '0 Bytes';
         const k = 1024;
         const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + (sizes[i] ?? 'Bytes');
     }
     formatDuration(seconds) {
         if (!seconds || seconds < 0)
