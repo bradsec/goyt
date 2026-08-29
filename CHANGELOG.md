@@ -5,6 +5,8 @@ versioning (CalVer): `YYYY.MM.DD`.
 
 ## [Unreleased]
 
+## [2026.08.29.2]
+
 ### Changed
 
 - Bumped golangci-lint to v2.13.2 so linting runs against the Go 1.27 build
