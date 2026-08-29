@@ -84,10 +84,9 @@ func TestExtractZipEntryRejectsOversizedEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f := &zip.File{FileHeader: zip.FileHeader{
-		Name:               "build/bin/ffmpeg.exe",
-		UncompressedSize64: ffmpegMaxExtractBytes + 1,
-	}}
+	f := &zip.File{}
+	f.Name = "build/bin/ffmpeg.exe"
+	f.UncompressedSize64 = ffmpegMaxExtractBytes + 1
 	err := extractZipEntry(f, dst)
 	if err == nil {
 		t.Fatal("extractZipEntry succeeded for oversized entry")

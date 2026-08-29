@@ -1,6 +1,6 @@
 {
   "name": "goyt",
-  "version": "2026.08.29.1",
+  "version": "2026.08.29.2",
   "type": "module",
   "description": "Self-hosted web interface for downloading video and audio with yt-dlp",
   "engines": {
@@ -12,16 +12,18 @@
     "build-js": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
     "build-assets": "npm run build-css && npm run build-js",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.worker.json --noEmit && tsc -p tsconfig.tests.json",
+    "lint": "oxlint frontend/src tests",
     "watch-css": "tailwindcss -i ./input.css -o ./internal/ui/assets/css/main.css --watch",
     "build": "npm run build-assets && go build -ldflags=\"-s -w -X goyt/internal/api.Version=$npm_package_version\" -o goyt ./cmd/goyt",
     "build-production": "npm run build",
     "test-ui": "tsx tests/ui/puppeteer-tests.ts",
     "test-progress": "tsx tests/ui/progress-test.ts",
-    "test": "npm run typecheck && go test ./... && npm run test-ui"
+    "test": "npm run lint && npm run typecheck && go test ./... && npm run test-ui"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",
     "@types/node": "^26.4.0",
+    "oxlint": "^1.80.0",
     "puppeteer": "^25.9.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.12",

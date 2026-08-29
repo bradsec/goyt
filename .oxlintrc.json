@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": [
+    "internal/**",
+    "node_modules/**"
+  ],
+  "env": {
+    "browser": true,
+    "es2024": true,
+    "serviceworker": true,
+    "node": true
+  },
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "warn"
+  },
+  "rules": {
+    "no-await-in-loop": "off",
+    "no-underscore-dangle": "off",
+    "unicorn/require-post-message-target-origin": "off"
+  }
+}

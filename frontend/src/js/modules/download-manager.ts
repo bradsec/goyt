@@ -87,6 +87,16 @@ function toError(error: unknown): CodedError {
   return error instanceof Error ? error as CodedError : new Error(String(error));
 }
 
+const CODEC_LABELS = {
+  h264: 'H.264', hevc: 'HEVC', aac: 'AAC', vp9: 'VP9',
+  vp8: 'VP8', av1: 'AV1', opus: 'Opus', vorbis: 'Vorbis',
+} as const;
+
+function prettyCodec(c: string | undefined): string {
+  if (!c) return '';
+  return CODEC_LABELS[c.toLowerCase() as keyof typeof CODEC_LABELS] || c.toUpperCase();
+}
+
 export class DownloadManager {
   apiClient: ApiClient;
   uiManager: UIManager;
@@ -333,8 +343,8 @@ export class DownloadManager {
     }
 
     // Quick hash comparison of all downloads
-    const oldHash = this.downloads.map(d => this.createDownloadHash(d)).sort().join('|');
-    const newHash = newDownloads.map(d => this.createDownloadHash(d)).sort().join('|');
+    const oldHash = this.downloads.map(d => this.createDownloadHash(d)).toSorted().join('|');
+    const newHash = newDownloads.map(d => this.createDownloadHash(d)).toSorted().join('|');
 
     return oldHash !== newHash;
   }
@@ -629,12 +639,7 @@ export class DownloadManager {
     const v = download.video_codec;
     const a = download.audio_codec;
     if (!v && !a) return '';
-    const pretty = (c: string | undefined): string => {
-      if (!c) return '';
-      const map = { h264: 'H.264', hevc: 'HEVC', aac: 'AAC', vp9: 'VP9', vp8: 'VP8', av1: 'AV1', opus: 'Opus', vorbis: 'Vorbis' };
-      return map[c.toLowerCase() as keyof typeof map] || c.toUpperCase();
-    };
-    const parts = [pretty(v), pretty(a)].filter(Boolean).join(' ');
+    const parts = [prettyCodec(v), prettyCodec(a)].filter(Boolean).join(' ');
     return `<span class="text-sm text-secondary">${this.escapeHtml(parts)}</span>`;
   }
 

@@ -5,6 +5,14 @@ versioning (CalVer): `YYYY.MM.DD`.
 
 ## [Unreleased]
 
+### Changed
+
+- Bumped golangci-lint to v2.13.2 so linting runs against the Go 1.27 build
+  target; the previous pin could not load the config under Go 1.27.
+- Added oxlint for TypeScript and JavaScript linting, wired into CI and
+  `npm test`.
+- Raised the TypeScript compile target and lib to ES2023.
+
 ## [2026.08.29]
 
 ### Changed

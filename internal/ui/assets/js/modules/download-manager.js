@@ -6,6 +6,15 @@ import { icon } from './icons.js';
 function toError(error) {
     return error instanceof Error ? error : new Error(String(error));
 }
+const CODEC_LABELS = {
+    h264: 'H.264', hevc: 'HEVC', aac: 'AAC', vp9: 'VP9',
+    vp8: 'VP8', av1: 'AV1', opus: 'Opus', vorbis: 'Vorbis',
+};
+function prettyCodec(c) {
+    if (!c)
+        return '';
+    return CODEC_LABELS[c.toLowerCase()] || c.toUpperCase();
+}
 export class DownloadManager {
     apiClient;
     uiManager;
@@ -228,8 +237,8 @@ export class DownloadManager {
             return true;
         }
         // Quick hash comparison of all downloads
-        const oldHash = this.downloads.map(d => this.createDownloadHash(d)).sort().join('|');
-        const newHash = newDownloads.map(d => this.createDownloadHash(d)).sort().join('|');
+        const oldHash = this.downloads.map(d => this.createDownloadHash(d)).toSorted().join('|');
+        const newHash = newDownloads.map(d => this.createDownloadHash(d)).toSorted().join('|');
         return oldHash !== newHash;
     }
     categorizeDownloads() {
@@ -502,13 +511,7 @@ export class DownloadManager {
         const a = download.audio_codec;
         if (!v && !a)
             return '';
-        const pretty = (c) => {
-            if (!c)
-                return '';
-            const map = { h264: 'H.264', hevc: 'HEVC', aac: 'AAC', vp9: 'VP9', vp8: 'VP8', av1: 'AV1', opus: 'Opus', vorbis: 'Vorbis' };
-            return map[c.toLowerCase()] || c.toUpperCase();
-        };
-        const parts = [pretty(v), pretty(a)].filter(Boolean).join(' ');
+        const parts = [prettyCodec(v), prettyCodec(a)].filter(Boolean).join(' ');
         return `<span class="text-sm text-secondary">${this.escapeHtml(parts)}</span>`;
     }
     renderProgress(download, percentage, sectionKey, index = 0) {

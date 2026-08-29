@@ -68,7 +68,7 @@ export class ApiClient {
         catch (error) {
             clearTimeout(timeoutId);
             if (error instanceof Error && error.name === 'AbortError') {
-                throw new Error('Request timed out');
+                throw new Error('Request timed out', { cause: error });
             }
             throw error;
         }

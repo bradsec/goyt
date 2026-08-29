@@ -21,6 +21,7 @@ jobs:
         with:
           go-version-file: go.mod
       - run: npm ci
+      - run: npm run lint
       - run: npm run typecheck
       - run: npm run build-assets
       - run: go mod verify
@@ -28,5 +29,5 @@ jobs:
       - run: go test -race ./...
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.2
+          version: v2.13.2
       - uses: golang/govulncheck-action@v1
