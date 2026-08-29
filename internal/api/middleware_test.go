@@ -29,9 +29,9 @@ func TestAuthMiddlewareExemptsAssets(t *testing.T) {
 	srv := h.AuthMiddleware(next)
 
 	cases := map[string]int{
-		"/assets/js/login.js":                          http.StatusOK,
+		"/assets/js/login.js": http.StatusOK,
 		"/assets/fonts/jetbrains-mono-latin-400-normal.woff2": http.StatusOK,
-		"/":       http.StatusFound, // still gated
+		"/":           http.StatusFound, // still gated
 		"/api/config": http.StatusUnauthorized,
 	}
 	for path, want := range cases {
