@@ -5,6 +5,23 @@ versioning (CalVer): `YYYY.MM.DD`.
 
 ## [Unreleased]
 
+## [2026.08.29.3]
+
+### Added
+
+- Releases now publish a pre-built multi-arch container image
+  (`linux/amd64`, `linux/arm64`) to `ghcr.io/bradsec/goyt`, tagged with the
+  CalVer version and `latest`. `docker-compose.yml` pulls it by default, so a
+  Docker install no longer requires a local toolchain build.
+
+### Fixed
+
+- Web UI login was unusable when `WEBUI_PASSWORD` (or a stored password hash)
+  was set: the auth middleware redirected `/assets/*` requests to `/login`, so
+  the login page received `text/html` for its module script and fonts
+  ("Failed to load module script", "invalid sfntVersion"). Static assets under
+  `/assets/` are now exempt from the login gate.
+
 ## [2026.08.29.2]
 
 ### Changed

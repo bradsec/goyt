@@ -1,12 +1,15 @@
 services:
   goyt:
-    build:
-      context: .
-      args:
-        # Override the stamped version, e.g. VERSION=2026.06.17 docker compose build.
-        # Unset falls back to the package.json version.
-        VERSION: ${VERSION:-}
-    image: goyt
+    # Pre-built multi-arch image published on each release. Pin a version by
+    # replacing `latest` with a CalVer tag, e.g. ghcr.io/bradsec/goyt:2026.08.29.
+    image: ghcr.io/bradsec/goyt:latest
+    # To build locally instead of pulling, comment the image line above and
+    # uncomment this block (VERSION overrides the stamped version; unset falls
+    # back to the package.json version):
+    # build:
+    #   context: .
+    #   args:
+    #     VERSION: ${VERSION:-}
     container_name: goyt
     restart: unless-stopped
     ports:

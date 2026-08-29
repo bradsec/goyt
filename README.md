@@ -44,10 +44,23 @@ A self-hosted, cross-platform web interface for yt-dlp, written in Go. Download 
 
 ### Installation
 
-#### Option 1: Pre-built Binaries
+#### Option 1: Docker (easiest)
+Every release publishes a ready-to-run multi-arch image to GitHub Container
+Registry. No toolchain, no build step:
+```bash
+docker run -d --name goyt \
+  -p 3000:3000 \
+  -v "$(pwd)/downloads:/app/downloads" \
+  -v goyt-ytdlp:/app/assets/yt-dlp \
+  ghcr.io/bradsec/goyt:latest
+```
+Then open `http://localhost:3000`. See [Docker](#docker) for Compose, the login
+gate, and persistence options.
+
+#### Option 2: Pre-built Binaries
 Download the latest release for your platform from the [Releases](https://github.com/bradsec/goyt/releases) section.
 
-#### Option 2: Build from Source
+#### Option 3: Build from Source
 ```bash
 git clone https://github.com/bradsec/goyt.git
 cd goyt
@@ -297,10 +310,20 @@ The container runs as a non-root user, binds to
 `0.0.0.0` so the published port is reachable, and includes a `/health`
 healthcheck. yt-dlp is downloaded and checksum-verified on first start.
 
+Each release publishes a pre-built multi-arch image (`linux/amd64`,
+`linux/arm64`) to GitHub Container Registry at
+[`ghcr.io/bradsec/goyt`](https://github.com/bradsec/goyt/pkgs/container/goyt),
+tagged with the CalVer version and `latest`. Pulling it skips the local
+toolchain build.
+
 #### Docker Compose (recommended)
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
+
+`docker-compose.yml` pulls `ghcr.io/bradsec/goyt:latest` by default. To build
+from source instead, edit the file per its comments and run
+`docker compose up -d --build`.
 
 Then open `http://localhost:3000`. Saved files land in `./downloads` on the
 host; the auto-downloaded yt-dlp binary persists in the `ytdlp` volume across
@@ -328,13 +351,15 @@ To keep login and sessions stable across restarts, bind-mount the config file:
 
 #### Plain Docker
 ```bash
-docker build -t goyt .
 docker run -d --name goyt \
   -p 3000:3000 \
   -v "$(pwd)/downloads:/app/downloads" \
   -v goyt-ytdlp:/app/assets/yt-dlp \
-  goyt
+  ghcr.io/bradsec/goyt:latest
 ```
+
+To build the image locally instead, run `docker build -t goyt .` and use `goyt`
+in place of `ghcr.io/bradsec/goyt:latest` above.
 
 To enable the login gate, also set `-e WEBUI_PASSWORD=yourpass`. To keep
 sessions stable across restarts, bind-mount the config file as well with
