@@ -51,6 +51,9 @@
  ▐▀▀▌  ▐▀▀▌▐▀▀▌  ▐▀▀▌      ▐▀▀▌   ▐▀▀▌
   ▐▄▄▄▄▄▄▄▌ ▐▄▄▄▄▄▄▌ ▐▄▄▄▄▄▄▄▌    ▐▄▄▌</pre>
     <h1>Sign in</h1>
+    <!-- Hidden, non-functional: satisfies the browser/password-manager
+         accessibility hint that a password form carry a username field. -->
+    <input type="text" name="username" autocomplete="username" value="goyt" hidden aria-hidden="true" tabindex="-1">
     <label for="password">Password</label>
     <input type="password" id="password" name="password" autocomplete="current-password" autofocus required>
     <div class="err" id="error" role="alert"></div>

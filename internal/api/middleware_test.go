@@ -18,6 +18,31 @@ const (
 	ContentTypeJSON = "application/json"
 )
 
+func TestAuthMiddlewareExemptsAssets(t *testing.T) {
+	h, _ := newTestHandler(t)
+	cfg := h.currentConfig()
+	cfg.WebUIPasswordHash = "x" // any non-empty value enables the login gate
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := h.AuthMiddleware(next)
+
+	cases := map[string]int{
+		"/assets/js/login.js":                          http.StatusOK,
+		"/assets/fonts/jetbrains-mono-latin-400-normal.woff2": http.StatusOK,
+		"/":       http.StatusFound, // still gated
+		"/api/config": http.StatusUnauthorized,
+	}
+	for path, want := range cases {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != want {
+			t.Errorf("GET %s: got %d, want %d", path, rec.Code, want)
+		}
+	}
+}
+
 func TestPanicRecoveryMiddleware(t *testing.T) {
 	// Create a handler that panics
 	panicHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

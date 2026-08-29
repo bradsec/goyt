@@ -32,12 +32,21 @@ var authExemptPaths = map[string]bool{
 	"/api/health": true,
 }
 
+// authExempt reports whether a request path bypasses the login gate. Static
+// assets under /assets/ are always exempt: the login page itself pulls its
+// fonts and module script from there, so gating them redirects those subresource
+// requests to /login and the browser receives text/html for a .js/.woff2 (the
+// "Failed to load module script" / "invalid sfntVersion" console errors).
+func authExempt(path string) bool {
+	return authExemptPaths[path] || strings.HasPrefix(path, "/assets/")
+}
+
 // AuthMiddleware enforces a valid session cookie when auth is enabled. When auth
 // is disabled it passes every request through unchanged.
 func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cfg := h.currentConfig()
-		if !cfg.AuthEnabled() || authExemptPaths[r.URL.Path] {
+		if !cfg.AuthEnabled() || authExempt(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
