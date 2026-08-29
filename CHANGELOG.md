@@ -5,6 +5,18 @@ versioning (CalVer): `YYYY.MM.DD`.
 
 ## [Unreleased]
 
+## [2026.08.29.4]
+
+### Fixed
+
+- Docker downloads failed with `[Errno 13] Permission denied` when the
+  bind-mounted `./downloads` directory was owned by root (Docker auto-creates it
+  that way) or by a uid other than the container's runtime user. The image now
+  ships an entrypoint that chowns the mounted data directories on start and then
+  drops to the unprivileged `goyt` user via `su-exec`, so a plain
+  `-v "$(pwd)/downloads:/app/downloads"` works regardless of host ownership.
+  Pass `--user` to opt out of the root phase.
+
 ## [2026.08.29.3]
 
 ### Added

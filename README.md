@@ -54,8 +54,17 @@ docker run -d --name goyt \
   -v goyt-ytdlp:/app/assets/yt-dlp \
   ghcr.io/bradsec/goyt:latest
 ```
-Then open `http://localhost:3000`. See [Docker](#docker) for Compose, the login
+Then open `http://localhost:3000`. Downloads land in `./downloads` on the host;
+the container fixes that directory's ownership on start, so a plain bind mount
+works regardless of who owns it. See [Docker](#docker) for Compose, the login
 gate, and persistence options.
+
+To stop and remove it:
+```bash
+docker rm -f goyt
+```
+Add `docker volume rm goyt-ytdlp` to also drop the cached yt-dlp binary. Your
+downloaded files stay in `./downloads`.
 
 #### Option 2: Pre-built Binaries
 Download the latest release for your platform from the [Releases](https://github.com/bradsec/goyt/releases) section.
@@ -306,9 +315,16 @@ server {
 A multi-stage `Dockerfile` builds the CSS assets and Go binary, then ships a
 small Alpine runtime with `ffmpeg`, `python3` (required by the yt-dlp zipapp),
 `deno` (JavaScript runtime for YouTube's nsig challenge), and `ca-certificates`.
-The container runs as a non-root user, binds to
-`0.0.0.0` so the published port is reachable, and includes a `/health`
-healthcheck. yt-dlp is downloaded and checksum-verified on first start.
+It binds to `0.0.0.0` so the published port is reachable and includes a
+`/health` healthcheck. yt-dlp is downloaded and checksum-verified on first
+start.
+
+The entrypoint starts as root only to take ownership of the bind-mounted
+`/app/downloads` and `/app/assets/yt-dlp`, then runs the app as the unprivileged
+`goyt` user via `su-exec`. This is why `-v "$(pwd)/downloads:/app/downloads"`
+works even when the host directory is owned by root or another user. Pass
+`--user "$(id -u):$(id -g)"` to skip the root phase and run entirely as your own
+uid (you must then ensure the mounted directories are writable by that uid).
 
 Each release publishes a pre-built multi-arch image (`linux/amd64`,
 `linux/arm64`) to GitHub Container Registry at
@@ -328,6 +344,13 @@ from source instead, edit the file per its comments and run
 Then open `http://localhost:3000`. Saved files land in `./downloads` on the
 host; the auto-downloaded yt-dlp binary persists in the `ytdlp` volume across
 container recreates.
+
+To stop and remove it:
+```bash
+docker compose down
+```
+Add `-v` (`docker compose down -v`) to also delete the `ytdlp` volume. Files in
+`./downloads` are untouched either way.
 
 #### Password and sessions in Docker
 
@@ -360,6 +383,9 @@ docker run -d --name goyt \
 
 To build the image locally instead, run `docker build -t goyt .` and use `goyt`
 in place of `ghcr.io/bradsec/goyt:latest` above.
+
+To stop and remove it, `docker rm -f goyt` (add `docker volume rm goyt-ytdlp` to
+drop the cached yt-dlp binary too).
 
 To enable the login gate, also set `-e WEBUI_PASSWORD=yourpass`. To keep
 sessions stable across restarts, bind-mount the config file as well with
