@@ -9,9 +9,13 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Cache npm install for the Tailwind CSS toolchain.
+# Install the Tailwind CSS + TypeScript toolchain. --ignore-scripts skips
+# lifecycle scripts: only build-time deps are needed here, and puppeteer's
+# postinstall (test-only) crashes with SIGILL under QEMU on linux/arm64, which
+# broke the multi-arch image build. tailwindcss and typescript ship prebuilt
+# binaries and need no postinstall.
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --ignore-scripts --no-audit --no-fund
 
 COPY . .
 

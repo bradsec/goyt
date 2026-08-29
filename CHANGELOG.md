@@ -5,6 +5,16 @@ versioning (CalVer): `YYYY.MM.DD`.
 
 ## [Unreleased]
 
+## [2026.08.29.5]
+
+### Fixed
+
+- The multi-arch container image failed to publish: `npm ci` in the build stage
+  crashed with `SIGILL` on `linux/arm64` under QEMU while running puppeteer's
+  postinstall (test-only tooling). The build now runs `npm ci --ignore-scripts`,
+  which also speeds it up. This is the first image to actually ship the
+  2026.08.29.4 bind-mount permission fix.
+
 ## [2026.08.29.4]
 
 ### Fixed
