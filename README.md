@@ -345,6 +345,15 @@ Then open `http://localhost:3000`. Saved files land in `./downloads` on the
 host; the auto-downloaded yt-dlp binary persists in the `ytdlp` volume across
 container recreates.
 
+To update to a new release:
+```bash
+docker compose pull
+docker compose up -d
+```
+Compose pulls the newer `latest` image and recreates the container. Downloads
+and the `ytdlp` volume carry over. If the file pins a version tag, bump it
+first.
+
 To stop and remove it:
 ```bash
 docker compose down
@@ -383,6 +392,18 @@ docker run -d --name goyt \
 
 To build the image locally instead, run `docker build -t goyt .` and use `goyt`
 in place of `ghcr.io/bradsec/goyt:latest` above.
+
+To update to a new release, pull and recreate:
+```bash
+docker pull ghcr.io/bradsec/goyt:latest
+docker rm -f goyt
+docker run -d --name goyt \
+  -p 3000:3000 \
+  -v "$(pwd)/downloads:/app/downloads" \
+  -v goyt-ytdlp:/app/assets/yt-dlp \
+  ghcr.io/bradsec/goyt:latest
+```
+The `goyt-ytdlp` volume and `./downloads` persist across the recreate.
 
 To stop and remove it, `docker rm -f goyt` (add `docker volume rm goyt-ytdlp` to
 drop the cached yt-dlp binary too).
