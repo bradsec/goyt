@@ -450,6 +450,12 @@ TypeScript sources under `frontend/src` and the CSS-first configuration in
 binary via `go:embed`, so rebuild the binary after changing frontend sources or
 images. `npm run build` runs the asset build before compiling Go.
 
+## Support
+
+If pdfmerge is useful to you, please consider starring the repository to help others discover it.
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/C8G129FZKM)
+
 ### Contributing
 1. Fork the repository
 2. Create a feature branch
