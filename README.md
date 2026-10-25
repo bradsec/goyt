@@ -452,7 +452,7 @@ images. `npm run build` runs the asset build before compiling Go.
 
 ## Support
 
-If pdfmerge is useful to you, please consider starring the repository to help others discover it.
+If goyt is useful to you, please consider starring the repository to help others discover it.
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/C8G129FZKM)
 
