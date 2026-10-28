@@ -8,7 +8,7 @@ A self-hosted, cross-platform web interface for yt-dlp, written in Go. Download 
 
 - **Multi-format downloads**: MP4, MKV, WebM, AVI video and MP3, M4A, WAV, FLAC audio
 - **Fast by default**: Video is remuxed into the chosen container without re-encoding; optional H.264 + AAC transcode for older devices
-- **Best available resolution**: MP4 and WebM selection prioritizes resolution, then prefers compatible source codecs at the same resolution. Enable compatibility re-encoding for H.264 + AAC output on older devices
+- **Best available resolution**: MP4 and WebM selection prioritizes resolution, then prefers compatible source codecs at the same resolution. YouTube offers H.264 only up to 1080p, so higher-resolution MP4 downloads contain VP9 or AV1 video. Enable compatibility re-encoding for H.264 + AAC output on older devices
 - **Terminal-inspired web UI**: Single dark theme, JetBrains Mono, responsive and mobile-friendly
 - **Concurrent downloads**: Configurable worker pool (1-10) with queue management
 - **Live progress**: Real-time download and ffmpeg processing progress per item
@@ -311,6 +311,8 @@ server {
     }
 }
 ```
+
+Keep `proxy_set_header Host $host`: the cross-origin check compares the browser's `Origin` with `Host`, so a rewritten `Host` makes every UI action fail with 403. Behind a proxy all clients share the proxy's IP, so the 10-per-minute login limit applies to all users together.
 
 ### Docker
 
