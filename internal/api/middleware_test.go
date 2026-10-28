@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"goyt/internal/auth"
@@ -40,6 +41,39 @@ func TestAuthMiddlewareExemptsAssets(t *testing.T) {
 		if rec.Code != want {
 			t.Errorf("GET %s: got %d, want %d", path, rec.Code, want)
 		}
+	}
+}
+
+func TestUnsafeAPIRequestsRejectCrossOrigin(t *testing.T) {
+	t.Setenv("WEBUI_PASSWORD", "")
+	h := newAuthTestHandler(t, "")
+	router := SetupRoutes(h, fstest.MapFS{})
+	tests := []struct {
+		name   string
+		method string
+		origin string
+		want   int
+	}{
+		{"same origin", http.MethodPost, "http://example.com:3000", http.StatusOK},
+		{"different port", http.MethodPost, "http://example.com:4000", http.StatusForbidden},
+		{"different host", http.MethodPost, "http://other.example.com:3000", http.StatusForbidden},
+		{"different scheme", http.MethodPost, "https://example.com:3000", http.StatusForbidden},
+		{"null origin", http.MethodPost, "null", http.StatusForbidden},
+		{"no origin API client", http.MethodPost, "", http.StatusOK},
+		{"cross origin read", http.MethodGet, "http://other.example.com:3000", http.StatusMethodNotAllowed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, "http://example.com:3000/api/logout", nil)
+			if tt.origin != "" {
+				req.Header.Set("Origin", tt.origin)
+			}
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			if rec.Code != tt.want {
+				t.Errorf("status = %d, want %d", rec.Code, tt.want)
+			}
+		})
 	}
 }
 

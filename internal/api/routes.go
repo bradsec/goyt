@@ -3,6 +3,7 @@ package api
 import (
 	"io/fs"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -66,6 +67,20 @@ func SetupRoutes(handler *Handler, assetsFS fs.FS) http.Handler {
 
 	var apiHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
+			if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
+				if origin := r.Header.Get("Origin"); origin != "" {
+					parsed, err := url.Parse(origin)
+					scheme := "http"
+					if isHTTPS(r) {
+						scheme = "https"
+					}
+					if err != nil || parsed.Scheme != scheme || !strings.EqualFold(parsed.Host, r.Host) ||
+						parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+						WriteErrorResponse(w, http.StatusForbidden, "Forbidden", "Cross-origin request denied.", "CROSS_ORIGIN")
+						return
+					}
+				}
+			}
 			limitedMux.ServeHTTP(w, r)
 			return
 		}
