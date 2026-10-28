@@ -25,8 +25,8 @@ type Config struct {
 	CompletedFileExpiryHours int    `json:"completed_file_expiry_hours"`
 	EnableHardwareAccel      bool   `json:"enable_hardware_acceleration"`
 	OptimizeForLowPower      bool   `json:"optimize_for_low_power"`
-	// ReencodeForCompatibility re-encodes video to H.264 + AAC for maximum
-	// device compatibility. Off by default: video is remuxed into the chosen
+	// ReencodeForCompatibility selects SDR H.264 + AAC up to 1080p when available
+	// and converts other video for device compatibility. Off by default: video is remuxed into the chosen
 	// container by stream copy, which is far faster, especially for several
 	// concurrent downloads. Audio extraction is unaffected.
 	ReencodeForCompatibility bool `json:"reencode_for_compatibility"`

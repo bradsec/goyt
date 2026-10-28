@@ -69,6 +69,7 @@ export class SettingsManager {
             this.versions = versions;
             this.applyClientTimeouts();
             this.updateSettingsForm();
+            this.updateCompatibilityNotice();
             this.updateVersionInfo();
             this.refreshCookiesStatus();
             this.wireCookieControls();
@@ -247,6 +248,7 @@ export class SettingsManager {
             const result = await this.apiClient.updateConfig(newSettings);
             this.settings = { ...this.settings, ...newSettings };
             this.applyClientTimeouts();
+            this.updateCompatibilityNotice();
             this.uiManager.showNotification('Settings saved successfully', 'success');
             if (result && Array.isArray(result.warnings)) {
                 for (const warning of result.warnings.filter((value) => typeof value === 'string')) {
@@ -433,6 +435,7 @@ export class SettingsManager {
             this.settings = defaultSettings;
             this.applyClientTimeouts();
             this.updateSettingsForm();
+            this.updateCompatibilityNotice();
             this.uiManager.showNotification('Settings reset to defaults', 'success');
         }
         catch (error) {
@@ -440,6 +443,11 @@ export class SettingsManager {
         }
     }
     // Utility methods
+    updateCompatibilityNotice() {
+        const notice = document.getElementById('compatibility-notice');
+        if (notice)
+            notice.hidden = this.settings.reencode_for_compatibility !== true;
+    }
     getSetting(key, defaultValue = null) {
         return this.settings[key] ?? defaultValue;
     }

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -914,15 +915,17 @@ func (dm *DownloadManager) processDownload(download *core.Download) bool {
 	progressChan := dm.progressChannels[download.ID]
 	downloader := dm.downloader
 	outputDir := dm.outputDir
+	compatibility := dm.config != nil && dm.config.ReencodeForCompatibility
 	dm.mutex.Unlock()
 	log.Printf("[MANAGER] Processing download %s", download.ID)
 
 	req := core.DownloadRequest{
-		URL:       download.URL,
-		Type:      download.Type,
-		Quality:   download.Quality,
-		Format:    download.Format,
-		OutputDir: outputDir,
+		URL:                      download.URL,
+		Type:                     download.Type,
+		Quality:                  download.Quality,
+		Format:                   download.Format,
+		OutputDir:                outputDir,
+		ReencodeForCompatibility: compatibility,
 	}
 
 	log.Printf("[MANAGER] Download %s: Creating context and starting download", download.ID)
@@ -984,6 +987,8 @@ func (dm *DownloadManager) processDownload(download *core.Download) bool {
 
 		download.Status = completedDownload.Status
 		download.Title = completedDownload.Title
+		download.Format = completedDownload.Format
+		download.CompatibilityCap = completedDownload.CompatibilityCap
 		download.Filename = completedDownload.Filename
 		download.OutputPath = completedDownload.OutputPath
 		download.FileSize = completedDownload.FileSize
@@ -992,6 +997,7 @@ func (dm *DownloadManager) processDownload(download *core.Download) bool {
 		download.VideoCodec = media.VideoCodec
 		download.AudioCodec = media.AudioCodec
 		download.Resolution = media.Resolution
+		download.Width, download.Height = media.Width, media.Height
 		download.HDR = media.HDR
 		download.AudioChannels = media.AudioChannels
 		download.AudioBitrate = media.AudioBitrate
@@ -1018,9 +1024,19 @@ func (dm *DownloadManager) processDownload(download *core.Download) bool {
 	return true
 }
 
-// videoIsCompatible reports whether a download is already H.264 + AAC.
+// videoIsCompatible reports whether a download needs no compatibility conversion.
 func videoIsCompatible(d *core.Download) bool {
-	return strings.EqualFold(d.VideoCodec, "h264") && strings.EqualFold(d.AudioCodec, "aac")
+	quality := strings.TrimSuffix(d.Resolution, "p")
+	shortSide, err := strconv.Atoi(quality)
+	if d.Width > 0 && d.Height > 0 {
+		shortSide, err = min(d.Width, d.Height), nil
+	}
+	cap := d.CompatibilityCap
+	if cap == 0 {
+		cap = 1080
+	}
+	return strings.EqualFold(d.VideoCodec, "h264") && strings.EqualFold(d.AudioCodec, "aac") &&
+		(d.AudioChannels == "Stereo" || d.AudioChannels == "Mono") && !d.HDR && err == nil && shortSide <= cap
 }
 
 // maybeAutoReencode implements the "Re-encode video for compatibility" setting
@@ -1036,36 +1052,41 @@ func (dm *DownloadManager) maybeAutoReencode(id string) {
 		d.Type == core.VideoDownload &&
 		(d.Status == core.StatusCompleted || d.Status == core.StatusAlreadyExists) &&
 		!d.Converted
-	var path, vcodec, acodec string
+	var path string
 	downloader := dm.downloader
 	if gate {
-		path, vcodec, acodec = d.OutputPath, d.VideoCodec, d.AudioCodec
+		path = d.OutputPath
 	}
 	dm.mutex.RUnlock()
 	if !gate || path == "" {
 		return
 	}
 
-	// Probe if codecs are unknown (e.g. an already-existing file that the
-	// completion path never probed), so we only convert when truly needed.
-	if vcodec == "" && acodec == "" {
-		if media, err := downloader.ProbeMedia(path); err == nil {
-			vcodec, acodec = media.VideoCodec, media.AudioCodec
-			dm.mutex.Lock()
-			if cur, ok := dm.downloads[id]; ok {
-				cur.VideoCodec, cur.AudioCodec = media.VideoCodec, media.AudioCodec
-				cur.Resolution, cur.HDR = media.Resolution, media.HDR
-				cur.AudioChannels, cur.AudioBitrate = media.AudioChannels, media.AudioBitrate
-			}
-			dm.mutex.Unlock()
+	// Probe the final file so the gate includes channels, HDR, and resolution.
+	if media, err := downloader.ProbeMedia(path); err == nil {
+		dm.mutex.Lock()
+		if cur, ok := dm.downloads[id]; ok {
+			cur.VideoCodec, cur.AudioCodec = media.VideoCodec, media.AudioCodec
+			cur.Resolution, cur.HDR = media.Resolution, media.HDR
+			cur.Width, cur.Height = media.Width, media.Height
+			cur.AudioChannels, cur.AudioBitrate = media.AudioChannels, media.AudioBitrate
 		}
+		dm.mutex.Unlock()
+	} else {
+		log.Printf("[MANAGER] %s: compatibility probe failed: %v", id, err)
 	}
-
-	if strings.EqualFold(vcodec, "h264") && strings.EqualFold(acodec, "aac") {
+	dm.mutex.RLock()
+	current := dm.downloads[id]
+	compatible := current != nil && videoIsCompatible(current)
+	dm.mutex.RUnlock()
+	if current == nil {
+		return
+	}
+	if compatible {
 		return // already compatible; nothing to do
 	}
 
-	log.Printf("[MANAGER] %s: auto re-encoding for compatibility (%s/%s -> h264/aac)", id, vcodec, acodec)
+	log.Printf("[MANAGER] %s: auto re-encoding for compatibility", id)
 	if err := dm.ConvertDownload(id); err != nil {
 		log.Printf("[MANAGER] %s: auto re-encode skipped: %v", id, err)
 	}
@@ -1233,6 +1254,7 @@ func (dm *DownloadManager) finishConvert(id string, prevStatus core.DownloadStat
 			download.VideoCodec = media.VideoCodec
 			download.AudioCodec = media.AudioCodec
 			download.Resolution = media.Resolution
+			download.Width, download.Height = media.Width, media.Height
 			download.HDR = media.HDR
 			download.AudioChannels = media.AudioChannels
 			download.AudioBitrate = media.AudioBitrate
@@ -1360,6 +1382,7 @@ func (dm *DownloadManager) checkFileExists(req core.DownloadRequest) string {
 	dm.mutex.RLock()
 	downloader := dm.downloader
 	outputDir := dm.outputDir
+	compatibility := dm.config != nil && dm.config.ReencodeForCompatibility
 	dm.mutex.RUnlock()
 	// Try to get video info to determine potential filename
 	info, err := downloader.GetVideoInfo(req.URL)
@@ -1370,6 +1393,9 @@ func (dm *DownloadManager) checkFileExists(req core.DownloadRequest) string {
 
 	// Determine expected file extension
 	expectedExt := "." + req.Format
+	if compatibility && req.Type == core.VideoDownload {
+		expectedExt = ".mp4"
+	}
 
 	// List of potential filenames to check
 	potentialFilenames := []string{

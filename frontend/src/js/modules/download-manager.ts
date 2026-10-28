@@ -653,6 +653,7 @@ export class DownloadManager {
     const badges = [
       [download.resolution, download.resolution === '4K' ? ' quality-badge-accent' : ''],
       [download.hdr ? 'HDR' : '', ' quality-badge-accent'],
+      [download.converted ? 'RE-ENCODED' : '', ''],
       [download.audio_channels, ''],
       [download.audio_bitrate, '']
     ];
@@ -940,14 +941,16 @@ export class DownloadManager {
     return actionMap[status] || ['remove'];
   }
 
-  // Convert is offered only for completed videos that are not already H.264+AAC
+  // Convert is offered only for completed videos that do not meet compatibility limits
   // and have not been converted yet.
   canConvert(download: Download): boolean {
     if (download.type !== 'video') return false;
     if (download.converted) return false;
     const v = (download.video_codec || '').toLowerCase();
     const a = (download.audio_codec || '').toLowerCase();
-    return !(v === 'h264' && a === 'aac');
+    const resolution = Number.parseInt(download.resolution || '', 10);
+    return !(v === 'h264' && a === 'aac' && (download.audio_channels === 'Stereo' || download.audio_channels === 'Mono') &&
+      !download.hdr && download.resolution?.endsWith('p') && Number.isFinite(resolution) && resolution <= 1080);
   }
 
   getActionConfig(action: DownloadAction): { class: string; icon: string; text: string; title: string } {
@@ -959,7 +962,7 @@ export class DownloadManager {
       remove: { class: 'btn-danger', icon: 'trash', text: 'Remove', title: 'Remove from list' },
       download: { class: 'btn-success', icon: 'file-down', text: 'Download', title: 'Download file' },
       play: { class: 'btn-primary', icon: 'play', text: 'Play', title: 'Play in browser' },
-      convert: { class: 'btn-secondary', icon: 'refresh', text: 'Convert', title: 'Convert to H.264 + AAC' }
+      convert: { class: 'btn-secondary', icon: 'refresh', text: 'Convert', title: 'Convert to 1080p H.264 + AAC SDR' }
     };
 
     return configs[action] || { class: 'btn-secondary', icon: 'info', text: 'Unknown', title: 'Unknown action' };

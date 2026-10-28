@@ -53,6 +53,8 @@ type MediaInfo struct {
 	VideoCodec    string
 	AudioCodec    string
 	Resolution    string
+	Width         int
+	Height        int
 	HDR           bool
 	AudioChannels string
 	AudioBitrate  string
@@ -85,6 +87,7 @@ func parseMediaOutput(out []byte) (MediaInfo, error) {
 			}
 			info.VideoCodec = strings.ToLower(stream.CodecName)
 			info.Resolution = resolutionLabel(stream.Width, stream.Height)
+			info.Width, info.Height = stream.Width, stream.Height
 			// PQ and HLG transfer functions mark HDR; 10-bit alone (VP9 Profile 2)
 			// is also used for SDR, so it is not a signal.
 			info.HDR = stream.ColorTransfer == "smpte2084" || stream.ColorTransfer == "arib-std-b67"
@@ -224,7 +227,7 @@ func (d *Downloader) probeDurationSeconds(filePath string) float64 {
 // buildConvertArgs builds ffmpeg arguments to transcode srcPath to H.264 + AAC
 // MP4 at dstPath, writing progress to progressFile. Uses a hardware H.264
 // encoder when available, otherwise libx264.
-func (d *Downloader) buildConvertArgs(srcPath, dstPath, progressFile string) []string {
+func (d *Downloader) buildConvertArgs(srcPath, dstPath, progressFile string, media MediaInfo, toneMap bool, cap int) []string {
 	args := []string{"-hide_banner", "-nostdin"}
 
 	hwAccel := d.getHardwareAcceleration()
@@ -232,6 +235,23 @@ func (d *Downloader) buildConvertArgs(srcPath, dstPath, progressFile string) []s
 		args = append(args, strings.Fields(hwAccel)...)
 	}
 	args = append(args, "-i", srcPath)
+	if cap <= 0 {
+		cap = 1080
+	}
+	filter := fmt.Sprintf("scale=w='trunc(iw*min(1\\,%d/min(iw\\,ih))/2)*2':h='trunc(ih*min(1\\,%d/min(iw\\,ih))/2)*2'", cap, cap)
+	if media.Width >= 2 && media.Height >= 2 {
+		factor := min(1, float64(cap)/float64(min(media.Width, media.Height)))
+		width := int(float64(media.Width)*factor) / 2 * 2
+		height := int(float64(media.Height)*factor) / 2 * 2
+		filter = fmt.Sprintf("scale=%d:%d", width, height)
+	}
+	if media.HDR && toneMap {
+		filter = "zscale=transfer=linear:npl=100,format=gbrpf32le,tonemap=tonemap=hable,zscale=primaries=bt709:transfer=bt709:matrix=bt709:range=tv," + filter
+	}
+	args = append(args, "-vf", filter)
+	if media.HDR && toneMap {
+		args = append(args, "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv")
+	}
 
 	vEncoder := "libx264"
 	if hwAccel != "" {
@@ -277,6 +297,18 @@ func (d *Downloader) ConvertToH264AAC(
 
 	progressFile := filepath.Join(os.TempDir(), fmt.Sprintf("goyt_convert_%s.txt", download.ID))
 	download.ProgressFile = progressFile
+	media, err := d.ProbeMedia(src)
+	if err != nil {
+		return "", fmt.Errorf("probe source before convert: %w", err)
+	}
+	toneMap := false
+	if media.HDR {
+		filters, filterErr := exec.CommandContext(ctx, ffmpeg, "-hide_banner", "-filters").Output()
+		toneMap = filterErr == nil && strings.Contains(string(filters), " zscale ") && strings.Contains(string(filters), " tonemap ")
+		if !toneMap {
+			log.Printf("[CONVERT] zscale or tonemap unavailable; converting HDR without tone mapping")
+		}
+	}
 	monitorCtx, stopMonitor := context.WithCancel(ctx)
 	var monitorWG sync.WaitGroup
 	defer func() {
@@ -290,7 +322,7 @@ func (d *Downloader) ConvertToH264AAC(
 		d.monitorFFmpegProgress(monitorCtx, progressFile, progressChan, download.ID, duration)
 	})
 
-	args := d.buildConvertArgs(src, tmpPath, progressFile)
+	args := d.buildConvertArgs(src, tmpPath, progressFile, media, toneMap, download.CompatibilityCap)
 	// #nosec G204 - ffmpeg path is resolved and validated above; other args are internal.
 	cmd := exec.CommandContext(ctx, ffmpeg, args...)
 	setupProcessGroup(cmd, download.ID)

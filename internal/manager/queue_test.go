@@ -470,10 +470,33 @@ func TestConvertDownloadEligibility(t *testing.T) {
 		t.Fatal("expected error converting non-completed download")
 	}
 
-	compat := &core.Download{ID: "c", URL: "u", Type: core.VideoDownload, Status: core.StatusCompleted, OutputPath: "/tmp/x.mp4", VideoCodec: "h264", AudioCodec: "aac"}
+	compat := &core.Download{ID: "c", URL: "u", Type: core.VideoDownload, Status: core.StatusCompleted, OutputPath: "/tmp/x.mp4", VideoCodec: "h264", AudioCodec: "aac", Resolution: "1080p", AudioChannels: "Stereo"}
 	dm.downloads["c"] = compat
 	if err := dm.ConvertDownload("c"); err == nil {
 		t.Fatal("expected error converting already-compatible video")
+	}
+}
+
+func TestVideoIsCompatible(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		video core.Download
+		want  bool
+	}{
+		{"1080p SDR stereo", core.Download{VideoCodec: "h264", AudioCodec: "aac", Resolution: "1080p", AudioChannels: "Stereo"}, true},
+		{"1080p SDR mono", core.Download{VideoCodec: "h264", AudioCodec: "aac", Resolution: "1080p", AudioChannels: "Mono"}, true},
+		{"1080p 5.1", core.Download{VideoCodec: "h264", AudioCodec: "aac", Resolution: "1080p", AudioChannels: "5.1"}, false},
+		{"4K", core.Download{VideoCodec: "h264", AudioCodec: "aac", Resolution: "4K", AudioChannels: "Stereo"}, false},
+		{"mislabeled short side", core.Download{VideoCodec: "h264", AudioCodec: "aac", Resolution: "1080p", Width: 1200, Height: 1920, AudioChannels: "Stereo"}, false},
+		{"720p cap", core.Download{VideoCodec: "h264", AudioCodec: "aac", Resolution: "1080p", Width: 1920, Height: 1080, CompatibilityCap: 720, AudioChannels: "Stereo"}, false},
+		{"HDR", core.Download{VideoCodec: "h264", AudioCodec: "aac", Resolution: "1080p", AudioChannels: "Stereo", HDR: true}, false},
+		{"surround", core.Download{VideoCodec: "h264", AudioCodec: "aac", Resolution: "1080p", AudioChannels: "5.1"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := videoIsCompatible(&tc.video); got != tc.want {
+				t.Fatalf("videoIsCompatible() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

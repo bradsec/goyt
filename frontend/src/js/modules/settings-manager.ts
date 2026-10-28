@@ -124,6 +124,7 @@ export class SettingsManager {
 
       this.applyClientTimeouts();
       this.updateSettingsForm();
+      this.updateCompatibilityNotice();
       this.updateVersionInfo();
       this.refreshCookiesStatus();
       this.wireCookieControls();
@@ -302,6 +303,7 @@ export class SettingsManager {
       const result = await this.apiClient.updateConfig(newSettings) as UpdateResult;
       this.settings = { ...this.settings, ...newSettings };
       this.applyClientTimeouts();
+      this.updateCompatibilityNotice();
 
       this.uiManager.showNotification('Settings saved successfully', 'success');
 
@@ -524,6 +526,7 @@ export class SettingsManager {
       this.settings = defaultSettings;
       this.applyClientTimeouts();
       this.updateSettingsForm();
+      this.updateCompatibilityNotice();
 
       this.uiManager.showNotification('Settings reset to defaults', 'success');
     } catch (error) {
@@ -532,6 +535,11 @@ export class SettingsManager {
   }
 
   // Utility methods
+  updateCompatibilityNotice(): void {
+    const notice = document.getElementById('compatibility-notice');
+    if (notice) notice.hidden = this.settings.reencode_for_compatibility !== true;
+  }
+
   getSetting(key: string, defaultValue: SettingValue = null): SettingValue {
     return this.settings[key] ?? defaultValue;
   }

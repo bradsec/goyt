@@ -78,6 +78,7 @@
                     <span class="sect-no" aria-hidden="true">01</span>
                     <span class="panel-label" id="command-title">Intake</span>
                 </div>
+                <p id="compatibility-notice" class="form-hint" hidden>Compatibility mode: video limited to 1080p H.264, stereo AAC, SDR.</p>
                 <form id="download-form">
                     <div class="form-group">
                         <label for="url-input" class="form-label" style="color: var(--accent)">Media URL</label>
@@ -139,7 +140,7 @@
                             <svg class="icon icon-sm" aria-hidden="true"><use href="#i-download"></use></svg>
                             <span class="btn-text">Start download</span>
                         </button>
-                        <p class="form-hint">Downloads are remuxed without re-encoding, so they stay fast and usually play everywhere. If one won't play on an older device, use its Convert button to transcode that file to H.264 + AAC.</p>
+                        <p class="form-hint">By default, downloads are remuxed without re-encoding. Use Compatibility mode or a completed video's Convert button for 1080p H.264 + AAC SDR output.</p>
                     </div>
                 </form>
             </section>
@@ -360,7 +361,7 @@
                             <input type="checkbox" name="reencode_for_compatibility" id="reencode_for_compatibility">
                             <span>Re-encode video for compatibility</span>
                         </label>
-                        <div class="form-help">When on, any download not already H.264 + AAC is transcoded to H.264 + AAC for older devices. This overrides the codecs of the format you choose, so a non-MP4 pick will not keep its native codecs. Off by default: downloads keep the exact format you select. You can still transcode an individual file later with its Convert button.</div>
+                        <div class="form-help">Prefer a direct SDR H.264 + stereo AAC stream at 1080p or lower. Convert only when needed. Video output is MP4, even if you choose another container. Off by default.</div>
                     </div>
 
                     <div class="form-group">

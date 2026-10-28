@@ -200,6 +200,31 @@ func TestVideoFormatPrefersResolutionBeforeCodec(t *testing.T) {
 	}
 }
 
+func TestCompatibilityFormatSelection(t *testing.T) {
+	d := NewDownloader("yt-dlp", "ffmpeg", "", false, false)
+	for _, tc := range []struct {
+		name, quality, format string
+		compat                bool
+		selector, sort        string
+	}{
+		{"best", "best", FormatMP4, true, "bestvideo[vcodec^=avc1][dynamic_range=SDR]+bestaudio[acodec^=mp4a][audio_channels<=2]/bestvideo[dynamic_range=SDR]+bestaudio/best", "res:1080,+hdr,+codec:avc:m4a"},
+		{"720p", "720p", FormatMP4, true, "bestvideo[vcodec^=avc1][dynamic_range=SDR]+bestaudio[acodec^=mp4a][audio_channels<=2]/bestvideo[dynamic_range=SDR]+bestaudio/best", "res:720,+hdr,+codec:avc:m4a"},
+		{"webm becomes mp4", "best", FormatWEBM, true, "bestvideo[vcodec^=avc1][dynamic_range=SDR]+bestaudio[acodec^=mp4a][audio_channels<=2]/bestvideo[dynamic_range=SDR]+bestaudio/best", "res:1080,+hdr,+codec:avc:m4a"},
+		{"off", "best", FormatMP4, false, "bestvideo+bestaudio/best", "res,+codec:avc:m4a"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := DownloadRequest{URL: "https://example.com/v", Type: VideoDownload, Quality: tc.quality, Format: tc.format, ReencodeForCompatibility: tc.compat}
+			args := d.buildYtDlpArgs(req, &Download{ID: "abc", Title: "Clip"})
+			if !argHasValue(args, "--format", tc.selector) || !argHasValue(args, "--format-sort", tc.sort) {
+				t.Fatalf("format selection = %v, want %q and %q", args, tc.selector, tc.sort)
+			}
+			if tc.compat && (!argHasValue(args, "--merge-output-format", FormatMP4) || !argHasValue(args, "--remux-video", FormatMP4)) {
+				t.Fatalf("compatibility output must be MP4: %v", args)
+			}
+		})
+	}
+}
+
 func TestGenerateID(t *testing.T) {
 	id1 := GenerateID()
 	time.Sleep(1 * time.Millisecond) // Ensure different timestamp

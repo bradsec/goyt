@@ -8,7 +8,7 @@ A self-hosted, cross-platform web interface for yt-dlp, written in Go. Download 
 
 - **Multi-format downloads**: MP4, MKV, WebM, AVI video and MP3, M4A, WAV, FLAC audio
 - **Fast by default**: Video is remuxed into the chosen container without re-encoding; optional H.264 + AAC transcode for older devices
-- **Best available resolution**: MP4 and WebM selection prioritizes resolution, then prefers compatible source codecs at the same resolution. YouTube offers H.264 only up to 1080p, so higher-resolution MP4 downloads contain VP9 or AV1 video. Enable compatibility re-encoding for H.264 + AAC output on older devices
+- **Best available resolution**: MP4 and WebM selection prioritizes resolution, then prefers compatible source codecs at the same resolution. Higher-resolution MP4 downloads can contain VP9 or AV1 video. Enable compatibility mode to prefer direct H.264 + AAC SDR at 1080p or lower, with conversion when needed
 - **Terminal-inspired web UI**: Single dark theme, JetBrains Mono, responsive and mobile-friendly
 - **Concurrent downloads**: Configurable worker pool (1-10) with queue management
 - **Live progress**: Real-time download and ffmpeg processing progress per item
@@ -151,7 +151,7 @@ The application creates a `config.json` file on first run with default settings:
 - **completed_file_expiry_hours**: Auto-cleanup completed downloads after N hours (0 = never)
 - **enable_hardware_acceleration**: Use hardware-accelerated encoding when re-encoding (if available)
 - **optimize_for_low_power**: Optimize for battery-powered devices
-- **reencode_for_compatibility**: Conditionally re-encode video to H.264 + AAC for older devices. Off by default, so downloads keep the exact format you select (each download is remuxed into the chosen container by stream copy, no transcode). When enabled, any download that is not already H.264 + AAC is transcoded to H.264 + AAC afterwards; this overrides the codecs of a non-MP4 format, so it will not keep its native codecs. Codecs are detected with ffprobe. Audio extraction is unaffected. Completed downloads display a codec badge (e.g., "H.264 · AAC") showing the actual video and audio codecs, with a per-video **Convert** button to transcode a single file to H.264 + AAC (MP4) on demand; the button hides once a file is already H.264 + AAC
+- **reencode_for_compatibility**: Off by default. When enabled, video prefers a direct SDR H.264 + stereo AAC stream at 1080p or lower, keeping a lower selected quality limit. If unavailable, goyt downloads the best SDR stream near that limit and converts it to H.264 + stereo AAC SDR MP4. The final conversion caps the short side at 1080 pixels, so portrait video stays portrait. This mode overrides a selected non-MP4 container. Audio extraction is unaffected. Without this mode, higher-resolution VP9 and AV1 streams remain available. Completed rows show actual codecs and a **RE-ENCODED** badge when converted. The per-video **Convert** button applies the same 1080p SDR output to an existing file.
 - **playlist_load_timeout_seconds**: Time to wait for a playlist to load (10-1800, default 180). Raise on slow networks or for very large playlists
 - **download_start_timeout_seconds**: Time to wait fetching video info before a download starts (10-1800, default 60). Raise on slow networks
 

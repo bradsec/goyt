@@ -52,11 +52,12 @@ const (
 )
 
 type DownloadRequest struct {
-	URL       string       `json:"url"`
-	Type      DownloadType `json:"type"`
-	Quality   string       `json:"quality"`
-	Format    string       `json:"format"`
-	OutputDir string       `json:"output_dir"`
+	URL                      string       `json:"url"`
+	Type                     DownloadType `json:"type"`
+	Quality                  string       `json:"quality"`
+	Format                   string       `json:"format"`
+	OutputDir                string       `json:"output_dir"`
+	ReencodeForCompatibility bool         `json:"-"`
 }
 
 type DownloadProgress struct {
@@ -81,29 +82,32 @@ type TitleUpdateCallback func(id, title string)
 type StatusUpdateCallback func(id string, status DownloadStatus)
 
 type Download struct {
-	ID            string           `json:"id"`
-	URL           string           `json:"url"`
-	Type          DownloadType     `json:"type"`
-	Quality       string           `json:"quality"`
-	Format        string           `json:"format"`
-	Status        DownloadStatus   `json:"status"`
-	Progress      DownloadProgress `json:"progress"`
-	Title         string           `json:"title"`
-	Filename      string           `json:"filename"`
-	OutputPath    string           `json:"output_path"`
-	FileSize      int64            `json:"file_size,omitempty"` // Final size in bytes, set on completion
-	CreatedAt     time.Time        `json:"created_at"`
-	CompletedAt   *time.Time       `json:"completed_at,omitempty"`
-	Error         string           `json:"error,omitempty"`
-	VideoCodec    string           `json:"video_codec,omitempty"`
-	AudioCodec    string           `json:"audio_codec,omitempty"`
-	Resolution    string           `json:"resolution,omitempty"`
-	HDR           bool             `json:"hdr,omitempty"`
-	AudioChannels string           `json:"audio_channels,omitempty"`
-	AudioBitrate  string           `json:"audio_bitrate,omitempty"`
-	Converted     bool             `json:"converted,omitempty"`
-	StatusMessage string           `json:"status_message,omitempty"`
-	ProgressFile  string           `json:"-"` // Path to FFMPEG progress file
+	ID               string           `json:"id"`
+	URL              string           `json:"url"`
+	Type             DownloadType     `json:"type"`
+	Quality          string           `json:"quality"`
+	Format           string           `json:"format"`
+	Status           DownloadStatus   `json:"status"`
+	Progress         DownloadProgress `json:"progress"`
+	Title            string           `json:"title"`
+	Filename         string           `json:"filename"`
+	OutputPath       string           `json:"output_path"`
+	FileSize         int64            `json:"file_size,omitempty"` // Final size in bytes, set on completion
+	CreatedAt        time.Time        `json:"created_at"`
+	CompletedAt      *time.Time       `json:"completed_at,omitempty"`
+	Error            string           `json:"error,omitempty"`
+	VideoCodec       string           `json:"video_codec,omitempty"`
+	AudioCodec       string           `json:"audio_codec,omitempty"`
+	Resolution       string           `json:"resolution,omitempty"`
+	Width            int              `json:"-"`
+	Height           int              `json:"-"`
+	CompatibilityCap int              `json:"-"`
+	HDR              bool             `json:"hdr,omitempty"`
+	AudioChannels    string           `json:"audio_channels,omitempty"`
+	AudioBitrate     string           `json:"audio_bitrate,omitempty"`
+	Converted        bool             `json:"converted,omitempty"`
+	StatusMessage    string           `json:"status_message,omitempty"`
+	ProgressFile     string           `json:"-"` // Path to FFMPEG progress file
 }
 
 // Default network timeouts used when SetTimeouts is not called (e.g. tests).
@@ -193,14 +197,20 @@ func (d *Downloader) Download(
 	statusCallback StatusUpdateCallback,
 	downloadID string,
 ) (*Download, error) {
+	cap := 0
+	if req.ReencodeForCompatibility && req.Type == VideoDownload {
+		req.Format = FormatMP4
+		cap = compatibilityCap(req.Quality)
+	}
 	download := &Download{
-		ID:        downloadID, // Use the ID from the manager
-		URL:       req.URL,
-		Type:      req.Type,
-		Quality:   req.Quality,
-		Format:    req.Format,
-		Status:    StatusQueued,
-		CreatedAt: time.Now(),
+		ID:               downloadID, // Use the ID from the manager
+		URL:              req.URL,
+		Type:             req.Type,
+		Quality:          req.Quality,
+		Format:           req.Format,
+		CompatibilityCap: cap,
+		Status:           StatusQueued,
+		CreatedAt:        time.Now(),
 	}
 
 	utils.LogInfo("[DOWNLOAD] %s: Added to queue - %s (%s %s)", download.ID, req.URL, req.Type, req.Format)
@@ -595,8 +605,17 @@ func (d *Downloader) buildYtDlpArgs(req DownloadRequest, download *Download) []s
 	} else {
 		// Video download - use natural format selection
 		videoFormat := d.getVideoFormat(req.Quality)
+		if req.ReencodeForCompatibility {
+			videoFormat = "bestvideo[vcodec^=avc1][dynamic_range=SDR]+bestaudio[acodec^=mp4a][audio_channels<=2]/bestvideo[dynamic_range=SDR]+bestaudio/best"
+		}
 		args = append(args, "--format", videoFormat)
-		if !strings.EqualFold(req.Quality, "worst") {
+		if req.ReencodeForCompatibility {
+			sort := fmt.Sprintf("res:%d,+hdr,+codec:avc:m4a", compatibilityCap(req.Quality))
+			if strings.EqualFold(req.Quality, "worst") {
+				sort = "+res,+hdr,+codec:avc:m4a"
+			}
+			args = append(args, "--format-sort", sort)
+		} else if !strings.EqualFold(req.Quality, "worst") {
 			switch req.Format {
 			case FormatMP4:
 				args = append(args, "--format-sort", "res,+codec:avc:m4a")
@@ -611,8 +630,12 @@ func (d *Downloader) buildYtDlpArgs(req DownloadRequest, download *Download) []s
 		// (DownloadManager.maybeAutoReencode) transcodes to H.264 + AAC only when
 		// the result is not already compatible, so already-compatible files are
 		// never needlessly re-encoded.
-		args = append(args, "--merge-output-format", req.Format)
-		args = append(args, "--remux-video", req.Format)
+		container := req.Format
+		if req.ReencodeForCompatibility {
+			container = FormatMP4
+		}
+		args = append(args, "--merge-output-format", container)
+		args = append(args, "--remux-video", container)
 
 		// Use yt-dlp's default filename template if we don't have a title.
 		// --restrict-filenames keeps that fallback ASCII-safe so emojis and
@@ -629,6 +652,19 @@ func (d *Downloader) buildYtDlpArgs(req DownloadRequest, download *Download) []s
 	args = append(args, req.URL)
 
 	return args
+}
+
+func compatibilityCap(quality string) int {
+	switch strings.ToLower(quality) {
+	case "720p":
+		return 720
+	case "480p":
+		return 480
+	case "360p":
+		return 360
+	default:
+		return 1080
+	}
 }
 
 // getHardwareAcceleration detects available hardware acceleration options
