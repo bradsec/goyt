@@ -1469,10 +1469,7 @@ func (m *progressMonitor) sendFFmpegProgressUpdate() {
 	eta := ""
 	if progressPercent > 0 && progressPercent < 100 {
 		if duration > 0 && currentTime > 0 {
-			remainingTime := (duration - currentTime)
-			if remainingTime > 0 {
-				eta = fmt.Sprintf("%.0fs", remainingTime)
-			}
+			eta = conversionETA(duration-currentTime, speed)
 		} else {
 			eta = "Processing..."
 		}
@@ -2174,6 +2171,24 @@ func (d *Downloader) GetPlaylistItems(url string) ([]PlaylistItem, error) {
 }
 
 // monitorFFmpegProgress monitors the FFMPEG progress file for real-time progress updates
+// conversionETA converts remaining media seconds into wall-clock time using
+// ffmpeg's speed ("0.405x" means 0.405 media seconds per second). Without a
+// usable speed it falls back to the media time.
+func conversionETA(remainingMedia float64, speed string) string {
+	if remainingMedia <= 0 {
+		return ""
+	}
+	if x, err := strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(speed), "x"), 64); err == nil && x > 0 {
+		remainingMedia /= x
+	}
+	return (time.Duration(remainingMedia * float64(time.Second))).Round(time.Second).String()
+}
+
+// elapsedLabel formats wall-clock processing time, e.g. "1m23s".
+func elapsedLabel(d time.Duration) string {
+	return d.Round(time.Second).String()
+}
+
 func (d *Downloader) monitorFFmpegProgress(
 	ctx context.Context,
 	progressFile string,
@@ -2190,6 +2205,7 @@ func (d *Downloader) monitorFFmpegProgress(
 
 	var lastSize int64
 	var ffmpegData = make(map[string]string)
+	started := time.Now()
 
 	for {
 		select {
@@ -2232,7 +2248,7 @@ func (d *Downloader) monitorFFmpegProgress(
 
 		// Parse progress data
 		if len(ffmpegData) > 0 {
-			d.parseFFmpegProgressData(ffmpegData, progressChan, downloadID, duration)
+			d.parseFFmpegProgressData(ffmpegData, progressChan, downloadID, duration, started)
 		}
 
 		lastSize = currentSize
@@ -2244,7 +2260,7 @@ func (d *Downloader) monitorFFmpegProgress(
 				Percentage:     100.0,
 				Phase:          "finalizing",
 				FFmpegProgress: "Finalizing conversion...",
-				ProcessingTime: fmt.Sprintf("%.2fs", duration),
+				ProcessingTime: elapsedLabel(time.Since(started)),
 			}
 			func() {
 				defer func() {
@@ -2270,6 +2286,7 @@ func (d *Downloader) parseFFmpegProgressData(
 	progressChan chan<- DownloadProgress,
 	downloadID string,
 	duration float64,
+	started time.Time,
 ) {
 	var progress DownloadProgress
 
@@ -2281,6 +2298,12 @@ func (d *Downloader) parseFFmpegProgressData(
 			// Calculate percentage
 			if duration > 0 {
 				rawPercentage := (currentTime / duration) * 100
+				// Once encoding reaches the end, ffmpeg still rewrites the file
+				// for +faststart without reporting progress; say so.
+				if rawPercentage >= 99 {
+					progress.Phase = "finalizing"
+					progress.FFmpegProgress = "Finalizing file..."
+				}
 				// Cap at 95% during processing to indicate there's still work remaining
 				if rawPercentage > 95 {
 					rawPercentage = 95
@@ -2289,15 +2312,12 @@ func (d *Downloader) parseFFmpegProgressData(
 				progress.Percentage = math.Round(rawPercentage*10) / 10
 			}
 
-			// Estimate remaining time
+			// Remaining media time runs at the encoder's speed, not real time.
 			if progress.Percentage > 0 && progress.Percentage < 100 {
-				remainingTime := (duration - currentTime)
-				if remainingTime > 0 {
-					progress.ETA = fmt.Sprintf("%.0fs", remainingTime)
-				}
+				progress.ETA = conversionETA(duration-currentTime, data["speed"])
 			}
 
-			progress.ProcessingTime = fmt.Sprintf("%.2fs", currentTime)
+			progress.ProcessingTime = elapsedLabel(time.Since(started))
 		}
 	}
 

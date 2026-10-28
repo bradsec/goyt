@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestValidateFFmpegURL(t *testing.T) {
@@ -116,5 +117,37 @@ func TestExtractZipEntryRejectsStreamBeyondLimit(t *testing.T) {
 	err := copyZipStream(&dst, strings.NewReader("too large"), "ffmpeg.exe", 4)
 	if err == nil || !strings.Contains(err.Error(), "exceeds maximum extracted size") {
 		t.Fatalf("copyZipStream error = %v, want size limit error", err)
+	}
+}
+
+func TestConversionETAUsesSpeed(t *testing.T) {
+	for _, tc := range []struct {
+		remaining float64
+		speed     string
+		want      string
+	}{
+		{102, "0.405x", "4m12s"},
+		{30, "2x", "15s"},
+		{30, "N/A", "30s"},
+		{30, "", "30s"},
+		{0, "1x", ""},
+	} {
+		if got := conversionETA(tc.remaining, tc.speed); got != tc.want {
+			t.Errorf("conversionETA(%v, %q) = %q, want %q", tc.remaining, tc.speed, got, tc.want)
+		}
+	}
+}
+
+func TestParseFFmpegProgressReportsWallTimeAndSpeedETA(t *testing.T) {
+	d := NewDownloader("yt-dlp", "ffmpeg", "", false, false)
+	ch := make(chan DownloadProgress, 1)
+	started := time.Now().Add(-58 * time.Second)
+	d.parseFFmpegProgressData(map[string]string{"out_time_us": "24000000", "speed": "0.405x", "frame": "714"}, ch, "id", 126, started)
+	p := <-ch
+	if p.ETA != "4m12s" {
+		t.Errorf("ETA = %q, want 4m12s (102s of media at 0.405x)", p.ETA)
+	}
+	if p.ProcessingTime != "58s" {
+		t.Errorf("ProcessingTime = %q, want elapsed wall time 58s", p.ProcessingTime)
 	}
 }

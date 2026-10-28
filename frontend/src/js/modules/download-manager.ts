@@ -772,6 +772,9 @@ export class DownloadManager {
     if (download.status === 'paused') {
       return { label: `Paused at ${percentage.toFixed(0)}%`, indeterminate: false, showPercent: false };
     }
+    if (phase === 'finalizing') {
+      return { label: 'Finalizing file', indeterminate: true, showPercent: false };
+    }
     if (download.status === 'post-processing' || download.status === 'processing' || phase === 'converting' || phase === 'processing') {
       return { label: 'Processing media', indeterminate: percentage <= 0, showPercent: percentage > 0 };
     }
