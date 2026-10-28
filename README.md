@@ -165,7 +165,7 @@ By default the web interface is open with no login required.
 
 ### Setting a password
 
-Run the `setpass` subcommand. It prompts for a password with hidden input and stores a PBKDF2 hash (never plaintext) plus a session secret in `config.json`. Restart goyt for the change to take effect. The hash and secret live in `config.json`, so they persist across rebuilds and restarts.
+Run the `setpass` subcommand. It prompts for a password with hidden input and stores a PBKDF2 hash (never plaintext) plus a new session secret in `config.json`, which signs out every existing session. Restart goyt for the change to take effect. The hash and secret live in `config.json`, so they persist across rebuilds and restarts.
 
 ```bash
 ./goyt setpass    # set or change the password
@@ -185,7 +185,7 @@ WEBUI_PASSWORD=yourpassword ./goyt
 ### Sessions and TLS
 
 Sessions use an HttpOnly cookie with a 7-day expiry. For remote access, terminate TLS at a reverse proxy so the cookie is transmitted securely.
-State-changing API requests with an `Origin` header must match the request scheme, host, and port. API clients that omit `Origin` remain supported.
+Login attempts are limited to 10 per minute per client IP. State-changing API requests from another site are rejected using Go's `http.CrossOriginProtection` (`Sec-Fetch-Site`, or `Origin` compared with `Host`). Behind a reverse proxy, forward the original `Host` header. API clients that send neither header remain supported.
 
 ## API Endpoints
 
