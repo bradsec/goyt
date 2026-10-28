@@ -96,20 +96,7 @@ func parseMediaOutput(out []byte) (MediaInfo, error) {
 				continue
 			}
 			info.AudioCodec = strings.ToLower(stream.CodecName)
-			switch stream.Channels {
-			case 1:
-				info.AudioChannels = "Mono"
-			case 2:
-				info.AudioChannels = "Stereo"
-			case 6:
-				info.AudioChannels = "5.1"
-			case 8:
-				info.AudioChannels = "7.1"
-			default:
-				if stream.Channels > 0 {
-					info.AudioChannels = fmt.Sprintf("%d channels", stream.Channels)
-				}
-			}
+			info.AudioChannels = channelLabel(stream.Channels)
 			info.AudioBitrate = bitrateLabel(stream.BitRate)
 		}
 	}
@@ -117,6 +104,24 @@ func parseMediaOutput(out []byte) (MediaInfo, error) {
 		info.AudioBitrate = bitrateLabel(probe.Format.BitRate)
 	}
 	return info, nil
+}
+
+func channelLabel(channels int) string {
+	switch channels {
+	case 1:
+		return "Mono"
+	case 2:
+		return "Stereo"
+	case 6:
+		return "5.1"
+	case 8:
+		return "7.1"
+	default:
+		if channels > 0 {
+			return fmt.Sprintf("%d channels", channels)
+		}
+		return ""
+	}
 }
 
 // resolutionLabel names the quality tier the way video sites do. Either side

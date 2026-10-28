@@ -12,7 +12,7 @@ A self-hosted, cross-platform web interface for yt-dlp, written in Go. Download 
 - **Terminal-inspired web UI**: Single dark theme, JetBrains Mono, responsive and mobile-friendly
 - **Concurrent downloads**: Configurable worker pool (1-10) with queue management
 - **Live progress**: Real-time download and ffmpeg processing progress per item
-- **Final media quality**: Completed downloads show video resolution, HDR, audio channels, and bitrate when available
+- **Media quality**: New downloads show selected source quality in a toast and active rows. Completed rows show final video resolution, HDR, audio channels, and bitrate from the downloaded file when available
 - **Queue controls**: Pause, resume, cancel, retry, and bulk clear of queued/completed/failed items
 - **Playlist handling**: Automatic playlist detection with whole-playlist or first-video options
 - **In-browser playback**: Stream completed video/audio in a built-in player

@@ -7,6 +7,7 @@ versioning (CalVer): `YYYY.MM.DD`.
 
 ### Added
 
+- New downloads show selected source quality in a start toast and active-row badges; completed rows use final ffprobe results.
 - Completed downloads show final video resolution, HDR, audio channels, and bitrate when available.
 - Compatibility mode prefers direct SDR H.264 and stereo AAC downloads at 1080p or lower, then converts when needed. Manual Convert also limits the short side to 1080p and tone maps HDR to SDR. The Intake panel shows the active limit, and converted files get a RE-ENCODED badge.
 

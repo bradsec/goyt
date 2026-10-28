@@ -79,6 +79,7 @@ type DownloadProgress struct {
 }
 
 type TitleUpdateCallback func(id, title string)
+type QualityUpdateCallback func(id string, quality MediaInfo)
 type StatusUpdateCallback func(id string, status DownloadStatus)
 
 type Download struct {
@@ -194,6 +195,7 @@ func (d *Downloader) Download(
 	req DownloadRequest,
 	progressChan chan<- DownloadProgress,
 	titleCallback TitleUpdateCallback,
+	qualityCallback QualityUpdateCallback,
 	statusCallback StatusUpdateCallback,
 	downloadID string,
 ) (*Download, error) {
@@ -216,7 +218,7 @@ func (d *Downloader) Download(
 	utils.LogInfo("[DOWNLOAD] %s: Added to queue - %s (%s %s)", download.ID, req.URL, req.Type, req.Format)
 
 	// Try to get video info first (non-blocking)
-	info, err := d.GetVideoInfo(req.URL)
+	title, quality, err := d.getSelectedInfo(req)
 	if err != nil {
 		if utils.VerboseLogging {
 			utils.LogDebugf("[DOWNLOAD] %s: Could not get video info, will extract during download", download.ID)
@@ -225,9 +227,15 @@ func (d *Downloader) Download(
 		download.Title = req.URL
 		download.Filename = fmt.Sprintf("download_%s", download.ID)
 	} else {
-		download.Title = info.Title
-		download.Filename = SanitizeFilename(info.Title)
-		utils.LogInfo("[DOWNLOAD] %s: Title identified - %s", download.ID, info.Title)
+		download.Title = title
+		download.Filename = SanitizeFilename(title)
+		download.VideoCodec, download.AudioCodec = quality.VideoCodec, quality.AudioCodec
+		download.Resolution, download.HDR = quality.Resolution, quality.HDR
+		download.AudioChannels, download.AudioBitrate = quality.AudioChannels, quality.AudioBitrate
+		if qualityCallback != nil {
+			qualityCallback(download.ID, quality)
+		}
+		utils.LogInfo("[DOWNLOAD] %s: Title identified - %s", download.ID, title)
 	}
 
 	// Update title in manager if callback is provided
@@ -585,7 +593,7 @@ func (d *Downloader) buildYtDlpArgs(req DownloadRequest, download *Download) []s
 
 		// Let yt-dlp choose the best audio format naturally
 		// This allows it to optimize and avoid unnecessary post-processing
-		args = append(args, "--format", "bestaudio/best")
+		args = append(args, d.selectionArgs(req)...)
 
 		// Add FFmpeg post-processing for audio to ensure compatibility and quality
 		audioFFmpegArgs := d.buildAudioFFmpegArgs(req.Format, progressFile)
@@ -604,25 +612,7 @@ func (d *Downloader) buildYtDlpArgs(req DownloadRequest, download *Download) []s
 		}
 	} else {
 		// Video download - use natural format selection
-		videoFormat := d.getVideoFormat(req.Quality)
-		if req.ReencodeForCompatibility {
-			videoFormat = "bestvideo[vcodec^=avc1][dynamic_range=SDR]+bestaudio[acodec^=mp4a][audio_channels<=2]/bestvideo[dynamic_range=SDR]+bestaudio/best"
-		}
-		args = append(args, "--format", videoFormat)
-		if req.ReencodeForCompatibility {
-			sort := fmt.Sprintf("res:%d,+hdr,+codec:avc:m4a", compatibilityCap(req.Quality))
-			if strings.EqualFold(req.Quality, "worst") {
-				sort = "+res,+hdr,+codec:avc:m4a"
-			}
-			args = append(args, "--format-sort", sort)
-		} else if !strings.EqualFold(req.Quality, "worst") {
-			switch req.Format {
-			case FormatMP4:
-				args = append(args, "--format-sort", "res,+codec:avc:m4a")
-			case FormatWEBM:
-				args = append(args, "--format-sort", "res,+codec:vp9:opus")
-			}
-		}
+		args = append(args, d.selectionArgs(req)...)
 
 		// Always merge separate streams and remux into the chosen container by
 		// stream copy, which is far faster than re-encoding. When "Re-encode
@@ -652,6 +642,104 @@ func (d *Downloader) buildYtDlpArgs(req DownloadRequest, download *Download) []s
 	args = append(args, req.URL)
 
 	return args
+}
+
+func (d *Downloader) selectionArgs(req DownloadRequest) []string {
+	if req.Type == AudioDownload {
+		return []string{"--format", "bestaudio/best"}
+	}
+	videoFormat := d.getVideoFormat(req.Quality)
+	if req.ReencodeForCompatibility {
+		videoFormat = "bestvideo[vcodec^=avc1][dynamic_range=SDR]+bestaudio[acodec^=mp4a][audio_channels<=2]/bestvideo[dynamic_range=SDR]+bestaudio/best"
+	}
+	args := []string{"--format", videoFormat}
+	if req.ReencodeForCompatibility {
+		sort := fmt.Sprintf("res:%d,+hdr,+codec:avc:m4a", compatibilityCap(req.Quality))
+		if strings.EqualFold(req.Quality, "worst") {
+			sort = "+res,+hdr,+codec:avc:m4a"
+		}
+		return append(args, "--format-sort", sort)
+	}
+	if !strings.EqualFold(req.Quality, "worst") {
+		switch req.Format {
+		case FormatMP4:
+			return append(args, "--format-sort", "res,+codec:avc:m4a")
+		case FormatWEBM:
+			return append(args, "--format-sort", "res,+codec:vp9:opus")
+		}
+	}
+	return args
+}
+
+func parseSelectedInfo(out []byte) (string, MediaInfo, error) {
+	var selected struct {
+		Title        string  `json:"title"`
+		Width        int     `json:"width"`
+		Height       int     `json:"height"`
+		DynamicRange string  `json:"dynamic_range"`
+		VideoCodec   string  `json:"vcodec"`
+		AudioCodec   string  `json:"acodec"`
+		AudioRate    float64 `json:"abr"`
+		Channels     int     `json:"audio_channels"`
+	}
+	if err := json.Unmarshal(out, &selected); err != nil {
+		return "", MediaInfo{}, err
+	}
+	if selected.Title == "" {
+		return "", MediaInfo{}, fmt.Errorf("yt-dlp returned no title")
+	}
+	codec := func(raw string) string {
+		raw = strings.ToLower(raw)
+		switch {
+		case raw == "none":
+			return ""
+		case strings.HasPrefix(raw, "vp09"), strings.HasPrefix(raw, "vp9"):
+			return "vp9"
+		case strings.HasPrefix(raw, "avc1"):
+			return "h264"
+		case strings.HasPrefix(raw, "av01"):
+			return "av1"
+		case strings.HasPrefix(raw, "mp4a"):
+			return "aac"
+		default:
+			return raw
+		}
+	}
+	info := MediaInfo{
+		VideoCodec: codec(selected.VideoCodec), AudioCodec: codec(selected.AudioCodec),
+		Width: selected.Width, Height: selected.Height,
+		HDR:           selected.DynamicRange != "" && !strings.EqualFold(selected.DynamicRange, "SDR"),
+		AudioChannels: channelLabel(selected.Channels),
+	}
+	if info.VideoCodec != "" {
+		info.Resolution = resolutionLabel(selected.Width, selected.Height)
+	}
+	if selected.AudioRate > 0 {
+		info.AudioBitrate = fmt.Sprintf("%d kbps", int(math.Round(selected.AudioRate)))
+	}
+	return selected.Title, info, nil
+}
+
+func (d *Downloader) getSelectedInfo(req DownloadRequest) (string, MediaInfo, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), d.videoInfoTimeout)
+	defer cancel()
+	path := d.ytDlpPath
+	if !filepath.IsAbs(path) {
+		if wd, err := os.Getwd(); err == nil {
+			path = filepath.Join(wd, path)
+		}
+	}
+	if err := utils.ValidateExecutablePath(path); err != nil {
+		return "", MediaInfo{}, fmt.Errorf("invalid yt-dlp path: %w", err)
+	}
+	args := append(d.cookieArgs(), d.jsRuntimeArgs()...)
+	args = append(args, d.selectionArgs(req)...)
+	args = append(args, "--dump-json", "--no-warnings", "--no-playlist", req.URL)
+	out, err := exec.CommandContext(ctx, path, args...).Output()
+	if err != nil {
+		return "", MediaInfo{}, err
+	}
+	return parseSelectedInfo(out)
 }
 
 func compatibilityCap(quality string) int {

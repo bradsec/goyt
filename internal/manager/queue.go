@@ -958,7 +958,7 @@ func (dm *DownloadManager) processDownload(download *core.Download) bool {
 	// Start download
 	log.Printf("[MANAGER] Download %s: Calling downloader.Download", download.ID)
 	completedDownload, err := downloader.Download(
-		ctx, req, progressChan, dm.UpdateDownloadTitle, dm.UpdateDownloadStatus, download.ID)
+		ctx, req, progressChan, dm.UpdateDownloadTitle, dm.UpdateDownloadQuality, dm.UpdateDownloadStatus, download.ID)
 
 	var media core.MediaInfo
 	if err == nil && completedDownload.OutputPath != "" {
@@ -1276,6 +1276,16 @@ func (dm *DownloadManager) UpdateDownloadTitle(id, title string) {
 			download.Title = title
 			log.Printf("[MANAGER] Download %s: Title updated to: %s", id, title)
 		}
+	}
+}
+
+func (dm *DownloadManager) UpdateDownloadQuality(id string, quality core.MediaInfo) {
+	dm.mutex.Lock()
+	defer dm.mutex.Unlock()
+	if download, exists := dm.downloads[id]; exists {
+		download.VideoCodec, download.AudioCodec = quality.VideoCodec, quality.AudioCodec
+		download.Resolution, download.HDR = quality.Resolution, quality.HDR
+		download.AudioChannels, download.AudioBitrate = quality.AudioChannels, quality.AudioBitrate
 	}
 }
 

@@ -38,6 +38,26 @@ func hasArg(args []string, want string) bool {
 	return slices.Contains(args, want)
 }
 
+func TestParseSelectedInfo(t *testing.T) {
+	tests := []struct {
+		name, input, title string
+		want               MediaInfo
+	}{
+		{"4K VP9 SDR merged", `{"title":"Clip","width":3840,"height":2160,"dynamic_range":"SDR","vcodec":"vp09.00.51.08","acodec":"mp4a.40.2","audio_channels":6}`, "Clip", MediaInfo{VideoCodec: "vp9", AudioCodec: "aac", Resolution: "4K", Width: 3840, Height: 2160, AudioChannels: "5.1"}},
+		{"HDR10", `{"title":"HDR","width":3840,"height":2160,"dynamic_range":"HDR10","vcodec":"vp9","acodec":"opus"}`, "HDR", MediaInfo{VideoCodec: "vp9", AudioCodec: "opus", Resolution: "4K", Width: 3840, Height: 2160, HDR: true}},
+		{"compat 1080p avc1", `{"title":"Compat","width":1920,"height":1080,"dynamic_range":"SDR","vcodec":"avc1.640028","acodec":"mp4a.40.2","audio_channels":2}`, "Compat", MediaInfo{VideoCodec: "h264", AudioCodec: "aac", Resolution: "1080p", Width: 1920, Height: 1080, AudioChannels: "Stereo"}},
+		{"audio-only opus", `{"title":"Music","vcodec":"none","acodec":"opus","abr":160.4,"audio_channels":2}`, "Music", MediaInfo{AudioCodec: "opus", AudioChannels: "Stereo", AudioBitrate: "160 kbps"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			title, got, err := parseSelectedInfo([]byte(tt.input))
+			if err != nil || title != tt.title || got != tt.want {
+				t.Fatalf("parseSelectedInfo() = %q, %+v, %v; want %q, %+v", title, got, err, tt.title, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildYtDlpArgsRemuxByDefault(t *testing.T) {
 	d := NewDownloader("yt-dlp", "ffmpeg", "", false, false)
 	req := DownloadRequest{URL: "https://example.com/v", Type: VideoDownload, Quality: "1080p", Format: FormatMP4}
@@ -455,7 +475,7 @@ func TestDownloadKeepsFinalYtDlpError(t *testing.T) {
 	for i := range 30 {
 		progress := make(chan DownloadProgress, 4096)
 		req := DownloadRequest{URL: "https://example.com/v", Type: VideoDownload, Quality: "best", Format: FormatMP4, OutputDir: dir}
-		dl, _ := d.Download(context.Background(), req, progress, nil, nil, fmt.Sprintf("t%d", i))
+		dl, _ := d.Download(context.Background(), req, progress, nil, nil, nil, fmt.Sprintf("t%d", i))
 		if dl == nil || !strings.Contains(dl.Error, "Sign in to confirm your age") {
 			got := "<nil download>"
 			if dl != nil {

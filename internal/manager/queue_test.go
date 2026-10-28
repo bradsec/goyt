@@ -12,6 +12,19 @@ import (
 	"goyt/internal/core"
 )
 
+func TestUpdateDownloadQuality(t *testing.T) {
+	dm := &DownloadManager{downloads: map[string]*core.Download{"a": {ID: "a", Status: core.StatusDownloading}}}
+	want := core.MediaInfo{VideoCodec: "vp9", AudioCodec: "aac", Resolution: "4K", HDR: true, AudioChannels: "5.1", AudioBitrate: "160 kbps"}
+	dm.UpdateDownloadQuality("a", want)
+	dm.mutex.RLock()
+	got := *dm.downloads["a"]
+	dm.mutex.RUnlock()
+	if got.VideoCodec != want.VideoCodec || got.AudioCodec != want.AudioCodec || got.Resolution != want.Resolution || got.HDR != want.HDR || got.AudioChannels != want.AudioChannels || got.AudioBitrate != want.AudioBitrate {
+		t.Fatalf("quality not applied: %+v", got)
+	}
+	dm.UpdateDownloadQuality("missing", want)
+}
+
 func TestNewDownloadManager(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "goyt_test")
 	if err != nil {

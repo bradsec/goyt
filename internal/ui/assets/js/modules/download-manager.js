@@ -23,6 +23,8 @@ export class DownloadManager {
     renderedSections;
     sections;
     _mediaModalWired = false;
+    notifiedQualityIds = new Set();
+    initialDownloadsLoaded = false;
     constructor(apiClient, uiManager) {
         this.apiClient = apiClient;
         this.uiManager = uiManager;
@@ -219,6 +221,42 @@ export class DownloadManager {
         try {
             const downloads = await this.apiClient.getDownloads();
             const newDownloads = Array.isArray(downloads) ? downloads : [];
+            const active = (download) => ['downloading', 'post-processing', 'processing', 'converting'].includes(download.status);
+            if (!this.initialDownloadsLoaded) {
+                newDownloads.filter(active).forEach(download => this.notifiedQualityIds.add(download.id));
+                this.initialDownloadsLoaded = true;
+            }
+            else {
+                for (const download of newDownloads) {
+                    if (!active(download) || this.notifiedQualityIds.has(download.id))
+                        continue;
+                    const parts = [];
+                    if (download.type === 'audio' && download.audio_codec) {
+                        parts.push(`Downloading audio: ${download.format.toUpperCase()} from `);
+                        parts.push({ label: prettyCodec(download.audio_codec) });
+                        if (download.audio_channels)
+                            parts.push(' ', { label: download.audio_channels });
+                        if (download.audio_bitrate)
+                            parts.push(' ', { label: download.audio_bitrate });
+                    }
+                    else if (download.type === 'video' && (download.video_codec || download.resolution)) {
+                        parts.push('Downloading: ');
+                        if (download.resolution)
+                            parts.push({ label: download.resolution, accent: download.resolution === '4K' }, ' ');
+                        if (download.hdr)
+                            parts.push({ label: 'HDR', accent: true }, ' ');
+                        const codecs = [prettyCodec(download.video_codec), prettyCodec(download.audio_codec)].filter(Boolean).join(' + ');
+                        if (codecs)
+                            parts.push(codecs);
+                        if (download.audio_channels)
+                            parts.push(' ', { label: download.audio_channels });
+                    }
+                    if (parts.length) {
+                        this.uiManager.showNotification(parts, 'info');
+                        this.notifiedQualityIds.add(download.id);
+                    }
+                }
+            }
             // Quick check if data has changed at all
             if (this.hasDownloadsChanged(newDownloads)) {
                 this.downloads = newDownloads;
@@ -289,9 +327,8 @@ export class DownloadManager {
         const progressSpeed = download.progress?.speed || '';
         // Round percentage to 1 decimal place to allow gradual updates while avoiding micro-changes
         const roundedPercentage = Math.round(this.parsePercentage(download.progress?.percentage) * 10) / 10;
-        // file_size and codecs land asynchronously after a download completes (stat
-        // + probe), so they must be in the hash or the card never repaints to show
-        // the final size / codec badge / convert action.
+        // Source quality and final probe results arrive asynchronously, so these
+        // fields must be in the hash for the card to repaint.
         const meta = `${download.file_size || ''}_${download.video_codec || ''}_${download.audio_codec || ''}_${download.resolution || ''}_${download.hdr ? 1 : 0}_${download.audio_channels || ''}_${download.audio_bitrate || ''}_${download.converted ? 1 : 0}`;
         const key = `${download.id}_${download.status}_${roundedPercentage}_${progressPhase}_${progressFrame}_${progressETA}_${progressSpeed}_${download.title}_${download.error || ''}_${meta}`;
         return key;
@@ -506,8 +543,7 @@ export class DownloadManager {
       </span>
     `;
     }
-    // Shows the file's actual codecs once probed, e.g. "H.264 · AAC" or
-    // "VP9 · Opus". Absent for downloads completed before codec probing existed.
+    // Shows expected codecs while active and actual codecs after probing.
     renderCodecBadge(download) {
         const v = download.video_codec;
         const a = download.audio_codec;
@@ -517,7 +553,7 @@ export class DownloadManager {
         return `<span class="text-sm text-secondary">${this.escapeHtml(parts)}</span>`;
     }
     renderQualityBadges(download) {
-        if (!['completed', 'already_exists'].includes(download.status))
+        if (!['completed', 'already_exists', 'downloading', 'post-processing', 'processing', 'converting'].includes(download.status))
             return '';
         const badges = [
             [download.resolution, download.resolution === '4K' ? ' quality-badge-accent' : ''],

@@ -77,12 +77,26 @@ export class UIManager {
         notification.innerHTML = `
       <div class="flex items-center gap-2">
         ${icon(this.getNotificationIcon(type), 'icon-sm')}
-        <span>${this.escapeHtml(message)}</span>
+        <span>${typeof message === 'string' ? this.escapeHtml(message) : ''}</span>
         <button type="button" class="btn-close ml-auto" aria-label="Close">
           ${icon('x', 'icon-sm')}
         </button>
       </div>
     `;
+        if (Array.isArray(message)) {
+            const content = notification.querySelector('span');
+            for (const part of message) {
+                if (typeof part === 'string') {
+                    content?.append(document.createTextNode(part));
+                }
+                else {
+                    const badge = document.createElement('span');
+                    badge.className = `quality-badge${part.accent ? ' quality-badge-accent' : ''}`;
+                    badge.textContent = part.label;
+                    content?.append(badge);
+                }
+            }
+        }
         // Add close functionality
         const closeBtn = notification.querySelector('.btn-close');
         closeBtn?.addEventListener('click', () => this.removeNotification(notification));
