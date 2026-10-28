@@ -3,7 +3,6 @@ package api
 import (
 	"io/fs"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 )
@@ -13,6 +12,9 @@ import (
 func GetPathVar(r *http.Request, key string) string {
 	return r.PathValue(key)
 }
+
+// loginAttemptsPerMinute caps password attempts per client IP.
+const loginAttemptsPerMinute = 10
 
 // SetupRoutes wires all API and asset routes onto a stdlib ServeMux using
 // Go 1.22+ method and wildcard patterns.
@@ -40,7 +42,9 @@ func SetupRoutes(handler *Handler, assetsFS fs.FS) http.Handler {
 	mux.HandleFunc("GET /api/downloads/{id}/download", handler.DownloadFile)
 	mux.HandleFunc("GET /api/downloads/{id}/stream", handler.StreamFile)
 	mux.HandleFunc("POST /api/validate", handler.ValidateURL)
-	mux.HandleFunc("POST /api/login", handler.Login)
+	// Each attempt costs a full PBKDF2 derivation, so login gets its own tight
+	// per-client budget on top of the general API limit.
+	mux.Handle("POST /api/login", NewRateLimiter(loginAttemptsPerMinute, time.Minute).Middleware(http.HandlerFunc(handler.Login)))
 	mux.HandleFunc("POST /api/logout", handler.Logout)
 	mux.HandleFunc("GET /api/yt-dlp/version", handler.GetUpdateInfo)
 	mux.HandleFunc("POST /api/yt-dlp/update", handler.UpdateYtDlp)
@@ -63,24 +67,16 @@ func SetupRoutes(handler *Handler, assetsFS fs.FS) http.Handler {
 	// sw.js, manifest), so limiting assets would trip the limiter on a few
 	// rapid refreshes and break page styling. Auth still wraps everything.
 	rateLimiter := NewRateLimiter(300, time.Minute)
-	limitedMux := rateLimiter.Middleware(mux)
+	// Reject state-changing cross-origin browser requests (CSRF). Clients that
+	// send neither Sec-Fetch-Site nor Origin, such as curl, are allowed.
+	csrf := http.NewCrossOriginProtection()
+	csrf.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		WriteErrorResponse(w, http.StatusForbidden, "Forbidden", "Cross-origin request denied.", "CROSS_ORIGIN")
+	}))
+	limitedMux := csrf.Handler(rateLimiter.Middleware(mux))
 
 	var apiHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
-			if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
-				if origin := r.Header.Get("Origin"); origin != "" {
-					parsed, err := url.Parse(origin)
-					scheme := "http"
-					if isHTTPS(r) {
-						scheme = "https"
-					}
-					if err != nil || parsed.Scheme != scheme || !strings.EqualFold(parsed.Host, r.Host) ||
-						parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
-						WriteErrorResponse(w, http.StatusForbidden, "Forbidden", "Cross-origin request denied.", "CROSS_ORIGIN")
-						return
-					}
-				}
-			}
 			limitedMux.ServeHTTP(w, r)
 			return
 		}

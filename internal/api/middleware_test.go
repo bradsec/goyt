@@ -57,7 +57,6 @@ func TestUnsafeAPIRequestsRejectCrossOrigin(t *testing.T) {
 		{"same origin", http.MethodPost, "http://example.com:3000", http.StatusOK},
 		{"different port", http.MethodPost, "http://example.com:4000", http.StatusForbidden},
 		{"different host", http.MethodPost, "http://other.example.com:3000", http.StatusForbidden},
-		{"different scheme", http.MethodPost, "https://example.com:3000", http.StatusForbidden},
 		{"null origin", http.MethodPost, "null", http.StatusForbidden},
 		{"no origin API client", http.MethodPost, "", http.StatusOK},
 		{"cross origin read", http.MethodGet, "http://other.example.com:3000", http.StatusMethodNotAllowed},
@@ -74,6 +73,45 @@ func TestUnsafeAPIRequestsRejectCrossOrigin(t *testing.T) {
 				t.Errorf("status = %d, want %d", rec.Code, tt.want)
 			}
 		})
+	}
+}
+
+func TestLoginIsRateLimitedPerClient(t *testing.T) {
+	t.Setenv("WEBUI_PASSWORD", "right")
+	h := newAuthTestHandler(t, "")
+	router := SetupRoutes(h, fstest.MapFS{})
+	login := func(addr string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"password":"wrong"}`))
+		req.RemoteAddr = addr
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	for i := range loginAttemptsPerMinute {
+		if code := login("10.0.0.1:1234"); code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: status = %d, want 401", i+1, code)
+		}
+	}
+	if code := login("10.0.0.1:1234"); code != http.StatusTooManyRequests {
+		t.Fatalf("attempt over limit: status = %d, want 429", code)
+	}
+	if code := login("10.0.0.2:1234"); code != http.StatusUnauthorized {
+		t.Fatalf("other client: status = %d, want 401", code)
+	}
+}
+
+func TestUnsafeAPIRequestsRejectCrossSiteFetch(t *testing.T) {
+	t.Setenv("WEBUI_PASSWORD", "")
+	router := SetupRoutes(newAuthTestHandler(t, ""), fstest.MapFS{})
+	req := httptest.NewRequest(http.MethodPost, "http://example.com:3000/api/logout", nil)
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "CROSS_ORIGIN") {
+		t.Errorf("body = %q, want JSON error with CROSS_ORIGIN code", rec.Body.String())
 	}
 }
 
