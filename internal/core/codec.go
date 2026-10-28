@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -46,45 +47,107 @@ func resolveExecutable(name string) (string, error) {
 	return resolved, nil
 }
 
-// parseCodecOutput reads ffprobe CSV output ("codec_type,codec_name" per line)
-// and returns the first video and first audio codec names, lowercased. Missing
-// streams yield empty strings.
-func parseCodecOutput(out string) (video, audio string) {
-	for line := range strings.SplitSeq(out, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, ",", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		// ffprobe's csv field order is not guaranteed to match the -show_entries
-		// order (it emits "h264,video", not "video,h264"), so identify the
-		// codec_type field by value rather than position.
-		a := strings.ToLower(strings.TrimSpace(parts[0]))
-		b := strings.ToLower(strings.TrimSpace(parts[1]))
-		var kind, name string
-		switch {
-		case a == "video" || a == "audio":
-			kind, name = a, b
-		case b == "video" || b == "audio":
-			kind, name = b, a
-		default:
-			continue
-		}
-		switch kind {
+// MediaInfo is what ffprobe reports about a finished file, reduced to the
+// labels the UI shows.
+type MediaInfo struct {
+	VideoCodec    string
+	AudioCodec    string
+	Resolution    string
+	HDR           bool
+	AudioChannels string
+	AudioBitrate  string
+}
+
+func parseMediaOutput(out []byte) (MediaInfo, error) {
+	var probe struct {
+		Streams []struct {
+			CodecType     string `json:"codec_type"`
+			CodecName     string `json:"codec_name"`
+			Width         int    `json:"width"`
+			Height        int    `json:"height"`
+			ColorTransfer string `json:"color_transfer"`
+			Channels      int    `json:"channels"`
+			BitRate       string `json:"bit_rate"`
+		} `json:"streams"`
+		Format struct {
+			BitRate string `json:"bit_rate"`
+		} `json:"format"`
+	}
+	if err := json.Unmarshal(out, &probe); err != nil {
+		return MediaInfo{}, err
+	}
+	var info MediaInfo
+	for _, stream := range probe.Streams {
+		switch stream.CodecType {
 		case "video":
-			if video == "" {
-				video = name
+			if info.VideoCodec != "" {
+				continue
 			}
+			info.VideoCodec = strings.ToLower(stream.CodecName)
+			info.Resolution = resolutionLabel(stream.Width, stream.Height)
+			// PQ and HLG transfer functions mark HDR; 10-bit alone (VP9 Profile 2)
+			// is also used for SDR, so it is not a signal.
+			info.HDR = stream.ColorTransfer == "smpte2084" || stream.ColorTransfer == "arib-std-b67"
 		case "audio":
-			if audio == "" {
-				audio = name
+			if info.AudioCodec != "" {
+				continue
 			}
+			info.AudioCodec = strings.ToLower(stream.CodecName)
+			switch stream.Channels {
+			case 1:
+				info.AudioChannels = "Mono"
+			case 2:
+				info.AudioChannels = "Stereo"
+			case 6:
+				info.AudioChannels = "5.1"
+			case 8:
+				info.AudioChannels = "7.1"
+			default:
+				if stream.Channels > 0 {
+					info.AudioChannels = fmt.Sprintf("%d channels", stream.Channels)
+				}
+			}
+			info.AudioBitrate = bitrateLabel(stream.BitRate)
 		}
 	}
-	return video, audio
+	if info.VideoCodec == "" && info.AudioBitrate == "" {
+		info.AudioBitrate = bitrateLabel(probe.Format.BitRate)
+	}
+	return info, nil
+}
+
+// resolutionLabel names the quality tier the way video sites do. Either side
+// may qualify a tier, so cinema crops (3840x1608) still read as 4K and
+// portrait video (1080x1920) as 1080p.
+func resolutionLabel(width, height int) string {
+	short, long := min(width, height), max(width, height)
+	if short <= 0 {
+		return ""
+	}
+	tiers := []struct {
+		short, long int
+		label       string
+	}{
+		{4320, 7680, "8K"},
+		{2160, 3840, "4K"},
+		{1440, 2560, "1440p"},
+		{1080, 1920, "1080p"},
+		{720, 1280, "720p"},
+	}
+	for _, t := range tiers {
+		if short >= t.short || long >= t.long {
+			return t.label
+		}
+	}
+	return fmt.Sprintf("%dp", short)
+}
+
+func bitrateLabel(raw string) string {
+	bps, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || bps <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d kbps", (bps+500)/1000)
 }
 
 // ffprobePath resolves the ffprobe binary. When ffmpegPath points at a real
@@ -107,24 +170,29 @@ func (d *Downloader) ffprobePath() string {
 // lowercased (e.g. "h264","aac"). A probe failure is returned as an error; the
 // caller decides whether to treat it as fatal.
 func (d *Downloader) ProbeCodecs(filePath string) (video, audio string, err error) {
+	info, err := d.ProbeMedia(filePath)
+	return info.VideoCodec, info.AudioCodec, err
+}
+
+// ProbeMedia returns codec and final quality labels from the media file.
+func (d *Downloader) ProbeMedia(filePath string) (MediaInfo, error) {
 	probe, err := resolveExecutable(d.ffprobePath())
 	if err != nil {
-		return "", "", fmt.Errorf("invalid ffprobe path: %w", err)
+		return MediaInfo{}, fmt.Errorf("invalid ffprobe path: %w", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	// #nosec G204 - probe path is validated above; filePath is an internal path.
 	cmd := exec.CommandContext(ctx, probe,
 		"-v", "error",
-		"-show_entries", "stream=codec_type,codec_name",
-		"-of", "csv=p=0",
+		"-show_entries", "stream=codec_type,codec_name,width,height,color_transfer,channels,bit_rate:format=bit_rate",
+		"-of", "json",
 		filePath)
 	out, err := cmd.Output()
 	if err != nil {
-		return "", "", fmt.Errorf("ffprobe failed: %w", err)
+		return MediaInfo{}, fmt.Errorf("ffprobe failed: %w", err)
 	}
-	v, a := parseCodecOutput(string(out))
-	return v, a, nil
+	return parseMediaOutput(out)
 }
 
 // probeDurationSeconds returns the media duration in seconds, or 0 if unknown.

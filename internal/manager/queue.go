@@ -957,12 +957,12 @@ func (dm *DownloadManager) processDownload(download *core.Download) bool {
 	completedDownload, err := downloader.Download(
 		ctx, req, progressChan, dm.UpdateDownloadTitle, dm.UpdateDownloadStatus, download.ID)
 
-	var videoCodec, audioCodec string
-	if err == nil && completedDownload.Type == core.VideoDownload && completedDownload.OutputPath != "" {
-		if v, a, probeErr := downloader.ProbeCodecs(completedDownload.OutputPath); probeErr != nil {
+	var media core.MediaInfo
+	if err == nil && completedDownload.OutputPath != "" {
+		if probed, probeErr := downloader.ProbeMedia(completedDownload.OutputPath); probeErr != nil {
 			log.Printf("[MANAGER] Download %s: codec probe failed: %v", download.ID, probeErr)
 		} else {
-			videoCodec, audioCodec = v, a
+			media = probed
 		}
 	}
 
@@ -989,8 +989,12 @@ func (dm *DownloadManager) processDownload(download *core.Download) bool {
 		download.FileSize = completedDownload.FileSize
 		download.CompletedAt = completedDownload.CompletedAt
 
-		download.VideoCodec = videoCodec
-		download.AudioCodec = audioCodec
+		download.VideoCodec = media.VideoCodec
+		download.AudioCodec = media.AudioCodec
+		download.Resolution = media.Resolution
+		download.HDR = media.HDR
+		download.AudioChannels = media.AudioChannels
+		download.AudioBitrate = media.AudioBitrate
 
 		log.Printf("[MANAGER] Download %s: Final status after completion: %s", download.ID, download.Status)
 	}
@@ -1045,11 +1049,13 @@ func (dm *DownloadManager) maybeAutoReencode(id string) {
 	// Probe if codecs are unknown (e.g. an already-existing file that the
 	// completion path never probed), so we only convert when truly needed.
 	if vcodec == "" && acodec == "" {
-		if v, a, err := downloader.ProbeCodecs(path); err == nil {
-			vcodec, acodec = v, a
+		if media, err := downloader.ProbeMedia(path); err == nil {
+			vcodec, acodec = media.VideoCodec, media.AudioCodec
 			dm.mutex.Lock()
 			if cur, ok := dm.downloads[id]; ok {
-				cur.VideoCodec, cur.AudioCodec = v, a
+				cur.VideoCodec, cur.AudioCodec = media.VideoCodec, media.AudioCodec
+				cur.Resolution, cur.HDR = media.Resolution, media.HDR
+				cur.AudioChannels, cur.AudioBitrate = media.AudioChannels, media.AudioBitrate
 			}
 			dm.mutex.Unlock()
 		}
@@ -1192,14 +1198,14 @@ func (dm *DownloadManager) finishConvert(id string, prevStatus core.DownloadStat
 	// Probe the converted file outside the lock: ffprobe can block for up to its
 	// timeout, and we must not hold dm.mutex (which gates polling and other
 	// actions) for that long.
-	var newV, newA string
+	var media core.MediaInfo
 	var probed bool
 	if err == nil && newPath != "" {
 		dm.mutex.RLock()
 		downloader := dm.downloader
 		dm.mutex.RUnlock()
-		if v, a, perr := downloader.ProbeCodecs(newPath); perr == nil {
-			newV, newA, probed = v, a, true
+		if result, perr := downloader.ProbeMedia(newPath); perr == nil {
+			media, probed = result, true
 		}
 	}
 
@@ -1224,8 +1230,12 @@ func (dm *DownloadManager) finishConvert(id string, prevStatus core.DownloadStat
 		download.Status = prevStatus
 		download.Progress = core.DownloadProgress{}
 		if probed {
-			download.VideoCodec = newV
-			download.AudioCodec = newA
+			download.VideoCodec = media.VideoCodec
+			download.AudioCodec = media.AudioCodec
+			download.Resolution = media.Resolution
+			download.HDR = media.HDR
+			download.AudioChannels = media.AudioChannels
+			download.AudioBitrate = media.AudioBitrate
 		}
 		log.Printf("[MANAGER] Convert %s completed: %s", id, newPath)
 	}

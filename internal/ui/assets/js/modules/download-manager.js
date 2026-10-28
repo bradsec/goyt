@@ -292,7 +292,7 @@ export class DownloadManager {
         // file_size and codecs land asynchronously after a download completes (stat
         // + probe), so they must be in the hash or the card never repaints to show
         // the final size / codec badge / convert action.
-        const meta = `${download.file_size || ''}_${download.video_codec || ''}_${download.audio_codec || ''}_${download.converted ? 1 : 0}`;
+        const meta = `${download.file_size || ''}_${download.video_codec || ''}_${download.audio_codec || ''}_${download.resolution || ''}_${download.hdr ? 1 : 0}_${download.audio_channels || ''}_${download.audio_bitrate || ''}_${download.converted ? 1 : 0}`;
         const key = `${download.id}_${download.status}_${roundedPercentage}_${progressPhase}_${progressFrame}_${progressETA}_${progressSpeed}_${download.title}_${download.error || ''}_${meta}`;
         return key;
     }
@@ -444,12 +444,13 @@ export class DownloadManager {
         <div class="download-url">${this.escapeHtml(download.url)}</div>
 
         <div class="download-meta">
-          <div class="flex items-center gap-2">
+          <div class="flex flex-wrap items-center gap-2">
             ${this.renderStatusBadge(download.status)}
             <span class="text-sm text-secondary">${this.escapeHtml(download.type)}</span>
             <span class="text-sm text-secondary">${this.escapeHtml(download.quality)}</span>
             <span class="text-sm text-secondary">${this.escapeHtml(download.format)}</span>
             ${this.renderCodecBadge(download)}
+            ${this.renderQualityBadges(download)}
             ${this.renderFileSize(download)}
           </div>
           <div class="text-sm text-secondary">
@@ -514,6 +515,17 @@ export class DownloadManager {
             return '';
         const parts = [prettyCodec(v), prettyCodec(a)].filter(Boolean).join(' ');
         return `<span class="text-sm text-secondary">${this.escapeHtml(parts)}</span>`;
+    }
+    renderQualityBadges(download) {
+        if (!['completed', 'already_exists'].includes(download.status))
+            return '';
+        const badges = [
+            [download.resolution, download.resolution === '4K' ? ' quality-badge-accent' : ''],
+            [download.hdr ? 'HDR' : '', ' quality-badge-accent'],
+            [download.audio_channels, ''],
+            [download.audio_bitrate, '']
+        ];
+        return badges.filter(([label]) => label).map(([label, accent]) => `<span class="quality-badge${accent}">${this.escapeHtml(label || '')}</span>`).join('');
     }
     renderProgress(download, percentage, sectionKey, index = 0) {
         const terminal = ['completed', 'already_exists', 'failed', 'error', 'cancelled', 'canceled'];

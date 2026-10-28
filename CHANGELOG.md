@@ -5,6 +5,10 @@ versioning (CalVer): `YYYY.MM.DD`.
 
 ## [Unreleased]
 
+### Added
+
+- Completed downloads show final video resolution, HDR, audio channels, and bitrate when available.
+
 ## [2026.10.28]
 
 ### Fixed

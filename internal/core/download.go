@@ -97,6 +97,10 @@ type Download struct {
 	Error         string           `json:"error,omitempty"`
 	VideoCodec    string           `json:"video_codec,omitempty"`
 	AudioCodec    string           `json:"audio_codec,omitempty"`
+	Resolution    string           `json:"resolution,omitempty"`
+	HDR           bool             `json:"hdr,omitempty"`
+	AudioChannels string           `json:"audio_channels,omitempty"`
+	AudioBitrate  string           `json:"audio_bitrate,omitempty"`
 	Converted     bool             `json:"converted,omitempty"`
 	StatusMessage string           `json:"status_message,omitempty"`
 	ProgressFile  string           `json:"-"` // Path to FFMPEG progress file
