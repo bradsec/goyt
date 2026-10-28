@@ -5,6 +5,8 @@ versioning (CalVer): `YYYY.MM.DD`.
 
 ## [Unreleased]
 
+## [2026.10.28.1]
+
 ### Added
 
 - New downloads show selected source quality in a start toast and active-row badges; completed rows use final ffprobe results.
