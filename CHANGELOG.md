@@ -5,6 +5,13 @@ versioning (CalVer): `YYYY.MM.DD`.
 
 ## [Unreleased]
 
+### Fixed
+
+- MP4 and WebM downloads now choose the highest available resolution before preferring container-friendly codecs. High-resolution VP9 or AV1 streams are no longer displaced by lower-resolution H.264 or VP9 streams. Downloads still remux by stream copy; optional compatibility re-encoding remains available.
+- Paused and canceled downloads remain visible, URL validation ignores stale replies, and connection status recovers after a successful poll.
+- State-changing API requests with a cross-origin `Origin` header are rejected, including requests from another port or subdomain.
+- Queue workers now claim downloads once, state saves are serialized, and temporary-file cleanup only matches the exact output filename.
+
 ## [2026.08.29.5]
 
 ### Fixed

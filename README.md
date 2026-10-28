@@ -8,6 +8,7 @@ A self-hosted, cross-platform web interface for yt-dlp, written in Go. Download 
 
 - **Multi-format downloads**: MP4, MKV, WebM, AVI video and MP3, M4A, WAV, FLAC audio
 - **Fast by default**: Video is remuxed into the chosen container without re-encoding; optional H.264 + AAC transcode for older devices
+- **Best available resolution**: MP4 and WebM selection prioritizes resolution, then prefers compatible source codecs at the same resolution. Enable compatibility re-encoding for H.264 + AAC output on older devices
 - **Terminal-inspired web UI**: Single dark theme, JetBrains Mono, responsive and mobile-friendly
 - **Concurrent downloads**: Configurable worker pool (1-10) with queue management
 - **Live progress**: Real-time download and ffmpeg processing progress per item
@@ -55,9 +56,9 @@ docker run -d --name goyt \
   ghcr.io/bradsec/goyt:latest
 ```
 Then open `http://localhost:3000`. Downloads land in `./downloads` on the host;
-the container fixes that directory's ownership on start, so a plain bind mount
-works regardless of who owns it. See [Docker](#docker) for Compose, the login
-gate, and persistence options.
+the container fixes that directory's ownership on start. Existing nested
+directories must also be writable by the container user. See [Docker](#docker)
+for Compose, the login gate, and persistence options.
 
 To stop and remove it:
 ```bash
@@ -184,6 +185,7 @@ WEBUI_PASSWORD=yourpassword ./goyt
 ### Sessions and TLS
 
 Sessions use an HttpOnly cookie with a 7-day expiry. For remote access, terminate TLS at a reverse proxy so the cookie is transmitted securely.
+State-changing API requests with an `Origin` header must match the request scheme, host, and port. API clients that omit `Origin` remain supported.
 
 ## API Endpoints
 
