@@ -301,27 +301,30 @@ func (d *Downloader) Download(
 
 	// Set up process group for proper child process cleanup (platform-specific)
 	setupProcessGroup(cmd, download.ID)
+	// Bound how long Wait keeps copying output after a cancel, in case a child
+	// outside the killed process group still holds the pipe open.
+	cmd.WaitDelay = 10 * time.Second
 
 	if utils.VerboseLogging {
 		utils.LogDebugf("[DOWNLOAD] %s: Working directory: %s", download.ID, req.OutputDir)
 	}
 
-	// Create progress reader
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		download.Status = StatusFailed
-		download.Error = fmt.Sprintf("Failed to create stdout pipe: %v", err)
-		return download, err
-	}
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		download.Status = StatusFailed
-		download.Error = fmt.Sprintf("Failed to create stderr pipe: %v", err)
-		return download, err
+	// Route output through io.Pipe rather than StdoutPipe/StderrPipe: with a
+	// non-file writer, Wait returns only after all output has been copied, and
+	// closing the writers afterwards gives the monitor a clean EOF. StdoutPipe
+	// would require every read to finish before Wait, which this flow cannot
+	// guarantee, and Wait closing the pipe early dropped yt-dlp's final ERROR.
+	stdout, stdoutW := io.Pipe()
+	stderr, stderrW := io.Pipe()
+	cmd.Stdout = stdoutW
+	cmd.Stderr = stderrW
+	closeOutput := func() {
+		stdoutW.Close()
+		stderrW.Close()
 	}
 
 	if err := cmd.Start(); err != nil {
+		closeOutput()
 		utils.LogError("[DOWNLOAD] %s: Failed to start yt-dlp: %v", download.ID, err)
 		download.Status = StatusFailed
 		download.Error = fmt.Sprintf("Failed to start yt-dlp: %v", err)
@@ -357,6 +360,7 @@ func (d *Downloader) Download(
 		utils.LogDebugf("[DOWNLOAD] %s: Waiting for yt-dlp to complete...", download.ID)
 	}
 	err = cmd.Wait()
+	closeOutput()
 
 	if ctx.Err() == context.Canceled {
 		utils.LogInfo("[DOWNLOAD] %s: Download canceled", download.ID)
@@ -1193,6 +1197,9 @@ func (m *progressMonitor) monitorStderr(stderr io.ReadCloser) {
 
 	if err := scanner.Err(); err != nil {
 		log.Printf("[DOWNLOAD] %s: Error reading stderr: %v", m.downloadID, err)
+		// Keep draining (e.g. after an over-long line) so yt-dlp never blocks
+		// or dies writing to a pipe nobody reads.
+		_, _ = io.Copy(io.Discard, stderr)
 	}
 }
 
@@ -1208,6 +1215,9 @@ func (m *progressMonitor) monitorStdout(stdout io.ReadCloser) {
 
 	if err := scanner.Err(); err != nil {
 		log.Printf("[DOWNLOAD] %s: Error reading stdout: %v", m.downloadID, err)
+		// Keep draining (e.g. after an over-long line) so yt-dlp never blocks
+		// or dies writing to a pipe nobody reads.
+		_, _ = io.Copy(io.Discard, stdout)
 	}
 }
 

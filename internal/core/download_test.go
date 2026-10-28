@@ -2,9 +2,11 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -404,5 +406,37 @@ func TestDownloadContext_Cancelation(t *testing.T) {
 	// Check if context is canceled
 	if ctx.Err() != context.Canceled {
 		t.Errorf("Expected context to be canceled")
+	}
+}
+
+// TestDownloadKeepsFinalYtDlpError guards the os/exec rule that Wait must not
+// run before pipe reads finish: Wait closes the pipes on exit, which dropped
+// yt-dlp's last ERROR line and left users with "exit status 1".
+func TestDownloadKeepsFinalYtDlpError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a shell script as a fake yt-dlp")
+	}
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "yt-dlp")
+	script := "#!/bin/sh\n" +
+		"for a in \"$@\"; do [ \"$a\" = --dump-json ] && exit 1; done\n" +
+		"i=0; while [ $i -lt 2000 ]; do echo \"[download] noise line $i\"; i=$((i+1)); done\n" +
+		"echo 'ERROR: [youtube] abc: Sign in to confirm your age' >&2\n" +
+		"exit 1\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d := NewDownloader(fake, "ffmpeg", "", false, false)
+	for i := range 30 {
+		progress := make(chan DownloadProgress, 4096)
+		req := DownloadRequest{URL: "https://example.com/v", Type: VideoDownload, Quality: "best", Format: FormatMP4, OutputDir: dir}
+		dl, _ := d.Download(context.Background(), req, progress, nil, nil, fmt.Sprintf("t%d", i))
+		if dl == nil || !strings.Contains(dl.Error, "Sign in to confirm your age") {
+			got := "<nil download>"
+			if dl != nil {
+				got = dl.Error
+			}
+			t.Fatalf("run %d: error = %q; want the yt-dlp ERROR text", i, got)
+		}
 	}
 }
