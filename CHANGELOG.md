@@ -5,6 +5,8 @@ versioning (CalVer): `YYYY.MM.DD`.
 
 ## [Unreleased]
 
+## [2026.10.28.4]
+
 ### Fixed
 
 - Convert and post-processing ETA now accounts for ffmpeg's speed (a 0.4x encode showed a third of the real time left), and "Processing time" shows elapsed wall-clock time instead of the position in the media. The final faststart pass shows "Finalizing file" instead of sitting at 95%.
