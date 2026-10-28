@@ -225,6 +225,7 @@ export class DownloadManager {
                 this.categorizeDownloads();
                 this.renderDownloads();
             }
+            this.uiManager.updateConnectionStatus(true);
         }
         catch (error) {
             console.error('Failed to refresh downloads:', error);
@@ -250,6 +251,7 @@ export class DownloadManager {
         this.downloads.forEach(download => {
             switch (download.status) {
                 case 'queued':
+                case 'paused':
                     this.sections.queued.downloads.push(download);
                     break;
                 case 'downloading':
@@ -266,6 +268,7 @@ export class DownloadManager {
                     break;
                 case 'failed':
                 case 'error':
+                case 'canceled':
                     this.sections.failed.downloads.push(download);
                     break;
             }
@@ -338,8 +341,6 @@ export class DownloadManager {
                 .reduce((sum, section) => sum + section.downloads.length, 0);
             emptyBoard.style.display = total === 0 ? 'flex' : 'none';
         }
-        // Update connection status
-        this.uiManager.updateConnectionStatus(true);
     }
     renderSection(sectionKey, section) {
         const container = document.getElementById(`${sectionKey}-content`);
@@ -767,7 +768,7 @@ export class DownloadManager {
             already_exists: ['play', 'download', 'convert', 'remove'],
             failed: ['retry', 'remove'],
             error: ['retry', 'remove'],
-            cancelled: ['retry', 'remove'],
+            canceled: ['retry', 'remove'],
             paused: ['resume', 'cancel', 'remove']
         };
         return actionMap[status] || ['remove'];

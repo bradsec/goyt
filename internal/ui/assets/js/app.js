@@ -132,14 +132,19 @@ class goytApp {
         // Escalate the message so a long validation (playlist enumeration can take
         // up to ~60s) does not look frozen.
         this.uiManager.showUrlValidating('Validating URL...');
+        const isCurrentUrl = () => document.getElementById('url-input')?.value === url;
         const progressTimers = [
-            setTimeout(() => this.uiManager.showUrlValidating('Still checking...'), 3000),
-            setTimeout(() => this.uiManager.showUrlValidating('Hang tight...'), 10000),
+            setTimeout(() => { if (isCurrentUrl())
+                this.uiManager.showUrlValidating('Still checking...'); }, 3000),
+            setTimeout(() => { if (isCurrentUrl())
+                this.uiManager.showUrlValidating('Hang tight...'); }, 10000),
         ];
         const clearProgressTimers = () => progressTimers.forEach(clearTimeout);
         try {
             const validationResult = await this.apiClient.validateUrl(url);
             clearProgressTimers();
+            if (!isCurrentUrl())
+                return;
             this.uiManager.showUrlValidationResult(validationResult);
             // Validation is advisory only. yt-dlp supports thousands of sites and the
             // info probe can fail for URLs that still download fine (cookies needed,
@@ -151,6 +156,8 @@ class goytApp {
         }
         catch (error) {
             clearProgressTimers();
+            if (!isCurrentUrl())
+                return;
             console.error('URL validation failed:', error);
             // Validation is advisory. On a timeout or network error (common on slow
             // links, where playlist enumeration can be slow), tell the user instead
