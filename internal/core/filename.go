@@ -16,8 +16,9 @@ func SanitizeFilename(filename string) string {
 	if name, potentialExt, found := strings.CutLast(filename, "."); found {
 		potentialExt = "." + potentialExt
 		// Only treat it as an extension if it's a common file extension
-		// and doesn't contain spaces (real extensions don't have spaces)
-		if !strings.Contains(potentialExt, " ") && len(potentialExt) <= 6 {
+		// and is plain ASCII alphanumeric: titles are remote input that becomes
+		// the yt-dlp output template, so "/" or "%(" must never survive here.
+		if len(potentialExt) > 1 && len(potentialExt) <= 6 && isASCIIAlnum(potentialExt[1:]) {
 			ext = potentialExt
 			filename = name
 		}
@@ -81,4 +82,13 @@ func sanitizeWindowsReservedNames(filename string) string {
 	}
 
 	return filename
+}
+
+func isASCIIAlnum(s string) bool {
+	for _, r := range s {
+		if r > unicode.MaxASCII || !(unicode.IsLetter(r) || unicode.IsDigit(r)) {
+			return false
+		}
+	}
+	return true
 }
