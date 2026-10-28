@@ -20,6 +20,9 @@ func TestDecodeDownloadRequestValidation(t *testing.T) {
 		{"valid audio", `{"url":"https://example.com/v","type":"audio","format":"mp3","quality":"best"}`, true},
 		{"passthrough container mov", `{"url":"https://example.com/v","type":"video","format":"mov"}`, true},
 		{"empty format and quality", `{"url":"https://example.com/v"}`, true},
+		{"valid audio and range", `{"url":"https://example.com/v","audio":"surround","range":"hdr"}`, true},
+		{"invalid audio", `{"url":"https://example.com/v","audio":"mono"}`, false},
+		{"invalid range", `{"url":"https://example.com/v","range":"dolby"}`, false},
 		{"path traversal in format", `{"url":"https://example.com/v","format":"mp4/../../../tmp/evil"}`, false},
 		{"backslash in format", `{"url":"https://example.com/v","format":"mp4\\..\\x"}`, false},
 		{"dot in format", `{"url":"https://example.com/v","format":"mp4.evil"}`, false},
@@ -43,8 +46,8 @@ func TestDecodeDownloadRequestValidation(t *testing.T) {
 			if ok != tc.ok {
 				t.Fatalf("decodeDownloadRequest ok=%v, want %v (status %d)", ok, tc.ok, w.Code)
 			}
-			if !tc.ok && w.Code == 0 {
-				t.Errorf("expected an error response to be written on rejection")
+			if !tc.ok && w.Code != http.StatusBadRequest {
+				t.Errorf("status=%d, want 400", w.Code)
 			}
 		})
 	}

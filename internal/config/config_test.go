@@ -25,6 +25,39 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.DefaultAudioFormat != "mp3" {
 		t.Errorf("Expected DefaultAudioFormat to be 'mp3', got '%s'", cfg.DefaultAudioFormat)
 	}
+	if cfg.DefaultAudio != "stereo" || cfg.DefaultVideoRange != "sdr" {
+		t.Errorf("audio/range defaults = %q/%q", cfg.DefaultAudio, cfg.DefaultVideoRange)
+	}
+}
+
+func TestAudioRangeConfigValidation(t *testing.T) {
+	for _, tc := range []struct {
+		audio, videoRange string
+		valid             bool
+	}{
+		{"stereo", "sdr", true}, {"surround", "hdr", true},
+		{"mono", "sdr", false}, {"stereo", "dolby", false},
+	} {
+		cfg := DefaultConfig()
+		cfg.DefaultAudio, cfg.DefaultVideoRange = tc.audio, tc.videoRange
+		if got := cfg.Validate() == nil; got != tc.valid {
+			t.Errorf("audio/range %q/%q valid=%v, want %v", tc.audio, tc.videoRange, got, tc.valid)
+		}
+	}
+}
+
+func TestOldConfigAudioRangeDefaults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"port":3000}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DefaultAudio != "stereo" || cfg.DefaultVideoRange != "sdr" {
+		t.Errorf("legacy config defaults = %q/%q", cfg.DefaultAudio, cfg.DefaultVideoRange)
+	}
 }
 
 func TestConfigValidation(t *testing.T) {

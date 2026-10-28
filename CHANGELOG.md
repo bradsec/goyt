@@ -5,6 +5,23 @@ versioning (CalVer): `YYYY.MM.DD`.
 
 ## [Unreleased]
 
+## [2026.10.28.2]
+
+### Added
+
+- Intake offers **Video range** (SDR or HDR when available) and **Audio quality** (stereo, or surround with 5.1 when available), with saved defaults (`default_video_range`, `default_audio`). Download API requests accept optional `range` and `audio`.
+- Saved files carry their measured quality, e.g. `title [4K HDR 5.1 384kbps].mp4`, controlled by the new `quality_in_filename` setting (on by default). Convert updates the suffix.
+- Audio-only downloads honour Audio quality: stereo prefers a stereo source, surround keeps 5.1 for M4A (384 kbps AAC), FLAC and WAV. MP3 stays stereo.
+
+### Changed
+
+- The quality label for `best` now reads "Highest available", and Intake labels read Video quality, Video range, Audio quality, Format, in that order. Audio-only downloads show only Audio quality and Format.
+- Compatibility mode locks Audio quality only for video downloads.
+
+### Fixed
+
+- Rows of running downloads now update their title and quality badges instead of keeping "Unknown Title".
+
 ## [2026.10.28.1]
 
 ### Added

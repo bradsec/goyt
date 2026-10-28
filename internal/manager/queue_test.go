@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -94,6 +95,44 @@ func TestAddDownload(t *testing.T) {
 
 	if download.URL != req.URL {
 		t.Errorf("Expected URL=%s, got %s", req.URL, download.URL)
+	}
+}
+
+func TestDownloadPersistsAudioAndRange(t *testing.T) {
+	dir := t.TempDir()
+	dm := NewDownloadManager(core.NewDownloader("yt-dlp", "ffmpeg", "", false, false), 0, dir, config.DefaultConfig())
+	defer dm.Shutdown()
+	req := core.DownloadRequest{URL: "https://example.com/audio-range", Type: core.VideoDownload, Quality: "best", Format: "mp4", Audio: "surround", Range: "hdr", OutputDir: dir}
+	download, err := dm.AddDownload(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if download.Audio != "surround" || download.Range != "hdr" {
+		t.Errorf("stored = %q/%q", download.Audio, download.Range)
+	}
+	if err := dm.SaveState(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(dm.GetStateFilePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state StateFile
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatal(err)
+	}
+	if saved := state.Downloads[download.ID]; saved == nil || saved.Audio != "surround" || saved.Range != "hdr" {
+		t.Errorf("saved download = %+v", saved)
+	}
+	second := req
+	second.Audio = "stereo"
+	second.Range = "sdr"
+	dm.mutex.Lock()
+	dm.downloads[download.ID].Status = core.StatusFailed
+	delete(dm.processingUrls, req.URL)
+	dm.mutex.Unlock()
+	if _, err := dm.AddDownload(second); err != nil {
+		t.Errorf("distinct settings rejected: %v", err)
 	}
 }
 
@@ -618,5 +657,41 @@ func TestCancelPausedDownload(t *testing.T) {
 	got, _ := dm.GetDownload(download.ID)
 	if got.Status != core.StatusCanceled {
 		t.Fatalf("status = %s, want canceled", got.Status)
+	}
+}
+
+func TestApplyQualityName(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.DefaultConfig()
+	dm := NewDownloadManager(core.NewDownloader("yt-dlp", "ffmpeg", "", false, false), 0, dir, cfg)
+	defer dm.Shutdown()
+	media := core.MediaInfo{VideoCodec: "vp9", Resolution: "4K", HDR: true, AudioChannels: "5.1", AudioBitrate: "384 kbps"}
+
+	src := filepath.Join(dir, "dino.mp4")
+	if err := os.WriteFile(src, []byte("v"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(dir, "dino [4K HDR 5.1 384kbps].mp4")
+	if got := dm.applyQualityName(src, media); got != want {
+		t.Fatalf("renamed to %q, want %q", got, want)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("renamed file missing: %v", err)
+	}
+
+	// Never overwrite: a second file whose target already exists keeps its name.
+	other := filepath.Join(dir, "dino.mp4")
+	if err := os.WriteFile(other, []byte("w"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := dm.applyQualityName(other, media); got != other {
+		t.Fatalf("overwrote existing target: got %q", got)
+	}
+
+	dm.mutex.Lock()
+	dm.config.QualityInFilename = false
+	dm.mutex.Unlock()
+	if got := dm.applyQualityName(other, media); got != other {
+		t.Fatalf("renamed with setting off: %q", got)
 	}
 }

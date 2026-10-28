@@ -86,19 +86,19 @@ export class ApiClient {
             timeout: this.downloadStartTimeout,
         });
     }
-    async startPlaylistDownload(url, type = 'video', quality = 'best', format = 'mp4') {
+    async startPlaylistDownload(url, type = 'video', quality = 'best', format = 'mp4', audio = 'stereo', range = 'sdr') {
         return this.request('/downloads/playlist', {
             method: 'POST',
-            body: JSON.stringify({ url, type, quality, format }),
+            body: JSON.stringify({ url, type, quality, format, audio, range }),
             // Server enumerates the playlist; stay above that so the client does not
             // abort with a misleading timeout while the server adds the download.
             timeout: this.playlistTimeout,
         });
     }
-    async downloadFirstVideo(url, type = 'video', quality = 'best', format = 'mp4') {
+    async downloadFirstVideo(url, type = 'video', quality = 'best', format = 'mp4', audio = 'stereo', range = 'sdr') {
         return this.request('/downloads/first-video', {
             method: 'POST',
-            body: JSON.stringify({ url, type, quality, format }),
+            body: JSON.stringify({ url, type, quality, format, audio, range }),
             // Server enumerates the playlist to find the first item.
             timeout: this.playlistTimeout,
         });

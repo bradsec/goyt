@@ -111,9 +111,9 @@
                         </div>
 
                         <div class="form-group">
-                            <label for="quality-select" class="form-label">Quality</label>
+                            <label for="quality-select" class="form-label">Video quality</label>
                             <select name="quality" id="quality-select" class="form-select">
-                                <option value="best">Best available</option>
+                                <option value="best">Highest available</option>
                                 <option value="4k">4K (2160p)</option>
                                 <option value="2k">2K (1440p)</option>
                                 <option value="1080p">1080p</option>
@@ -122,6 +122,24 @@
                                 <option value="360p">360p</option>
                                 <option value="worst">Smallest size</option>
                             </select>
+                        </div>
+
+                        <div class="form-group" id="range-group">
+                            <label for="range-select" class="form-label">Video range</label>
+                            <select name="range" id="range-select" class="form-select">
+                                <option value="sdr">SDR</option>
+                                <option value="hdr">HDR (if available, else SDR)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" id="audio-group">
+                            <label for="audio-select" class="form-label">Audio quality</label>
+                            <select name="audio" id="audio-select" class="form-select">
+                                <option value="stereo">Stereo</option>
+                                <option value="surround">Surround (5.1 if available)</option>
+                            </select>
+                            <p id="webm-surround-hint" class="form-hint" hidden>WebM keeps surround only for Opus tracks; use MP4 or MKV for 5.1.</p>
+                            <p id="mp3-surround-hint" class="form-hint" hidden>MP3 is stereo only; use M4A, FLAC or WAV for 5.1.</p>
                         </div>
 
                         <div class="form-group">
@@ -264,6 +282,36 @@
                     </div>
 
                     <div class="form-group">
+                        <label for="default_video_quality" class="form-label">Default video quality</label>
+                        <select name="default_video_quality" id="default_video_quality" class="form-select">
+                            <option value="best">Highest available</option>
+                            <option value="4k">4K (2160p)</option>
+                            <option value="2k">2K (1440p)</option>
+                            <option value="1080p">1080p</option>
+                            <option value="720p">720p</option>
+                            <option value="480p">480p</option>
+                            <option value="360p">360p</option>
+                            <option value="worst">Smallest size</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="default_video_range" class="form-label">Default video range</label>
+                        <select name="default_video_range" id="default_video_range" class="form-select">
+                            <option value="sdr">SDR</option>
+                            <option value="hdr">HDR (if available, else SDR)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="default_audio" class="form-label">Default audio quality</label>
+                        <select name="default_audio" id="default_audio" class="form-select">
+                            <option value="stereo">Stereo</option>
+                            <option value="surround">Surround (5.1 if available)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
                         <label for="default_video_format" class="form-label">Default video format</label>
                         <select name="default_video_format" id="default_video_format" class="form-select">
                             <option value="mp4">MP4</option>
@@ -279,20 +327,6 @@
                             <option value="m4a">M4A</option>
                             <option value="wav">WAV</option>
                             <option value="flac">FLAC</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="default_video_quality" class="form-label">Default video quality</label>
-                        <select name="default_video_quality" id="default_video_quality" class="form-select">
-                            <option value="best">Best available</option>
-                            <option value="4k">4K (2160p)</option>
-                            <option value="2k">2K (1440p)</option>
-                            <option value="1080p">1080p</option>
-                            <option value="720p">720p</option>
-                            <option value="480p">480p</option>
-                            <option value="360p">360p</option>
-                            <option value="worst">Smallest size</option>
                         </select>
                     </div>
                 </fieldset>
@@ -362,6 +396,14 @@
                             <span>Re-encode video for compatibility</span>
                         </label>
                         <div class="form-help">Prefer a direct SDR H.264 + stereo AAC stream at 1080p or lower. Convert only when needed. Video output is MP4, even if you choose another container. Off by default.</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="check-row">
+                            <input type="checkbox" name="quality_in_filename" id="quality_in_filename">
+                            <span>Add quality to filename</span>
+                        </label>
+                        <div class="form-help">Appends the measured quality to saved files, e.g. <code>title [4K HDR 5.1 384kbps].mp4</code>. Updated after Convert. On by default.</div>
                     </div>
 
                     <div class="form-group">

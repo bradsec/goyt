@@ -56,6 +56,8 @@ type DownloadRequest struct {
 	Type                     DownloadType `json:"type"`
 	Quality                  string       `json:"quality"`
 	Format                   string       `json:"format"`
+	Audio                    string       `json:"audio"`
+	Range                    string       `json:"range"`
 	OutputDir                string       `json:"output_dir"`
 	ReencodeForCompatibility bool         `json:"-"`
 }
@@ -88,6 +90,8 @@ type Download struct {
 	Type             DownloadType     `json:"type"`
 	Quality          string           `json:"quality"`
 	Format           string           `json:"format"`
+	Audio            string           `json:"audio,omitempty"`
+	Range            string           `json:"range,omitempty"`
 	Status           DownloadStatus   `json:"status"`
 	Progress         DownloadProgress `json:"progress"`
 	Title            string           `json:"title"`
@@ -596,7 +600,7 @@ func (d *Downloader) buildYtDlpArgs(req DownloadRequest, download *Download) []s
 		args = append(args, d.selectionArgs(req)...)
 
 		// Add FFmpeg post-processing for audio to ensure compatibility and quality
-		audioFFmpegArgs := d.buildAudioFFmpegArgs(req.Format, progressFile)
+		audioFFmpegArgs := d.buildAudioFFmpegArgs(req.Format, progressFile, req.Audio == "surround")
 		if audioFFmpegArgs != "" {
 			args = append(args, "--postprocessor-args", "ffmpeg:"+audioFFmpegArgs)
 		}
@@ -646,7 +650,11 @@ func (d *Downloader) buildYtDlpArgs(req DownloadRequest, download *Download) []s
 
 func (d *Downloader) selectionArgs(req DownloadRequest) []string {
 	if req.Type == AudioDownload {
-		return []string{"--format", "bestaudio/best"}
+		channelSort := "channels:2"
+		if req.Audio == "surround" {
+			channelSort = "channels"
+		}
+		return []string{"--format", "bestaudio/best", "--format-sort", channelSort}
 	}
 	videoFormat := d.getVideoFormat(req.Quality)
 	if req.ReencodeForCompatibility {
@@ -661,12 +669,26 @@ func (d *Downloader) selectionArgs(req DownloadRequest) []string {
 		return append(args, "--format-sort", sort)
 	}
 	if !strings.EqualFold(req.Quality, "worst") {
+		rangeSort := "+hdr"
+		if req.Range == "hdr" {
+			rangeSort = "hdr"
+		}
+		channelSort := "channels:2"
+		if req.Audio == "surround" {
+			channelSort = "channels"
+		}
+		sort := "res," + rangeSort + "," + channelSort
 		switch req.Format {
 		case FormatMP4:
-			return append(args, "--format-sort", "res,+codec:avc:m4a")
+			sort += ",+codec:avc:m4a"
 		case FormatWEBM:
-			return append(args, "--format-sort", "res,+codec:vp9:opus")
+			sort += ",+codec:vp9:opus"
+			if req.Audio == "surround" {
+				video, _, _ := strings.Cut(videoFormat, "+bestaudio")
+				args[1] = video + "+bestaudio[acodec^=opus]/" + video + "+bestaudio[acodec=vorbis]/" + videoFormat
+			}
 		}
+		return append(args, "--format-sort", sort)
 	}
 	return args
 }
@@ -840,7 +862,10 @@ func RequiresFfmpeg(downloadType DownloadType, format string) bool {
 	}
 }
 
-func (d *Downloader) buildAudioFFmpegArgs(format string, progressFile string) string {
+// buildAudioFFmpegArgs returns the audio encode settings. surround keeps the
+// source channel layout for containers that can hold it; MP3 is limited to
+// two channels and always downmixes.
+func (d *Downloader) buildAudioFFmpegArgs(format string, progressFile string, surround bool) string {
 	var baseArgs string
 	if utils.VerboseLogging {
 		baseArgs = fmt.Sprintf("-progress %s -stats -loglevel info", progressFile)
@@ -848,6 +873,12 @@ func (d *Downloader) buildAudioFFmpegArgs(format string, progressFile string) st
 		// Use -loglevel warning instead of error to allow progress output
 		// -nostats hides stats but progress file still works
 		baseArgs = fmt.Sprintf("-progress %s -nostats -loglevel warning", progressFile)
+	}
+
+	channels, aacRate := "-ac 2 ", "128k"
+	if surround {
+		// AAC needs more bitrate for six channels than for two.
+		channels, aacRate = "", "384k"
 	}
 
 	switch format {
@@ -859,17 +890,17 @@ func (d *Downloader) buildAudioFFmpegArgs(format string, progressFile string) st
 	case "m4a":
 		// Optimized AAC - good quality, faster encoding
 		// Lower bitrate but still good quality, standard sample rate
-		return fmt.Sprintf("-c:a aac -b:a 128k -ac 2 -ar 44100 %s", baseArgs)
+		return fmt.Sprintf("-c:a aac -b:a %s %s-ar 44100 %s", aacRate, channels, baseArgs)
 
 	case "wav":
 		// Standard WAV - no unnecessary processing
 		// 16-bit PCM, standard sample rate
-		return fmt.Sprintf("-c:a pcm_s16le -ac 2 -ar 44100 %s", baseArgs)
+		return fmt.Sprintf("-c:a pcm_s16le %s-ar 44100 %s", channels, baseArgs)
 
 	case "flac":
 		// Faster FLAC encoding - lower compression for speed
 		// Standard sample rate, compression level 3 (faster)
-		return fmt.Sprintf("-c:a flac -compression_level 3 -ac 2 -ar 44100 %s", baseArgs)
+		return fmt.Sprintf("-c:a flac -compression_level 3 %s-ar 44100 %s", channels, baseArgs)
 
 	default:
 		// Fallback to MP3 for unknown formats

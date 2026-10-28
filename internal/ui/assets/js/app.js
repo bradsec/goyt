@@ -76,6 +76,8 @@ class goytApp {
             // Initialize on page load
             this.handleTypeChange({ target: typeSelect });
         }
+        document.getElementById('audio-select')?.addEventListener('change', () => this.updateWebmSurroundHint());
+        document.getElementById('format-select')?.addEventListener('change', () => this.updateWebmSurroundHint());
         // Settings toggle
         const settingsToggle = document.getElementById('settings-toggle');
         if (settingsToggle) {
@@ -100,11 +102,15 @@ class goytApp {
         const typeValue = formData.get('type');
         const qualityValue = formData.get('quality');
         const formatValue = formData.get('format');
+        const audioValue = formData.get('audio');
+        const rangeValue = formData.get('range');
         const downloadData = {
             url: typeof urlValue === 'string' ? urlValue.trim() : '',
             type: typeof typeValue === 'string' && typeValue ? typeValue : 'video',
             quality: typeof qualityValue === 'string' && qualityValue ? qualityValue : 'best',
-            format: typeof formatValue === 'string' && formatValue ? formatValue : 'mp4'
+            format: typeof formatValue === 'string' && formatValue ? formatValue : 'mp4',
+            audio: typeof audioValue === 'string' && audioValue ? audioValue : 'stereo',
+            range: typeof rangeValue === 'string' && rangeValue ? rangeValue : 'sdr'
         };
         if (!downloadData.url) {
             this.uiManager.showNotification('Please enter a valid URL', 'warning');
@@ -112,7 +118,10 @@ class goytApp {
         }
         try {
             await this.downloadManager.startDownload(downloadData);
-            form.reset();
+            await this.uiManager.resetForm('download-form');
+            const typeSelect = document.getElementById('type-select');
+            if (typeSelect)
+                this.handleTypeChange({ target: typeSelect });
             this.uiManager.clearUrlValidation();
         }
         catch (error) {
@@ -241,6 +250,12 @@ class goytApp {
                 }
             }
         }
+        // Audio quality applies to both types; video range only to video.
+        const rangeGroup = document.getElementById('range-group');
+        if (rangeGroup)
+            rangeGroup.hidden = selectedType === 'audio';
+        this.settingsManager.updateCompatibilityNotice();
+        this.updateWebmSurroundHint();
         // Update form grid layout when quality is hidden
         const formGrid = qualityGroup?.closest('.form-grid');
         if (formGrid) {
@@ -253,6 +268,17 @@ class goytApp {
                 formGrid.classList.add('form-grid-cols-3');
             }
         }
+    }
+    updateWebmSurroundHint() {
+        const hint = document.getElementById('webm-surround-hint');
+        const format = document.getElementById('format-select');
+        const audio = document.getElementById('audio-select');
+        const type = document.getElementById('type-select');
+        if (hint)
+            hint.hidden = type?.value !== 'video' || format?.value !== 'webm' || audio?.value !== 'surround';
+        const mp3Hint = document.getElementById('mp3-surround-hint');
+        if (mp3Hint)
+            mp3Hint.hidden = type?.value !== 'audio' || format?.value !== 'mp3' || audio?.value !== 'surround';
     }
     handleKeyboardShortcuts(event) {
         // Ctrl/Cmd + K to focus search
@@ -331,6 +357,14 @@ class goytApp {
         if (qualitySelect && settings.default_video_quality) {
             qualitySelect.value = settings.default_video_quality;
         }
+        const audioSelect = document.getElementById('audio-select');
+        if (audioSelect)
+            audioSelect.value = settings.default_audio || 'stereo';
+        const rangeSelect = document.getElementById('range-select');
+        if (rangeSelect)
+            rangeSelect.value = settings.default_video_range || 'sdr';
+        this.settingsManager.updateCompatibilityNotice();
+        this.updateWebmSurroundHint();
     }
     cleanup() {
         this.stopPolling();

@@ -115,22 +115,25 @@ export class DownloadManager {
                 url: formData.url,
                 type: formData.type || 'video',
                 quality: formData.quality || 'best',
-                format: formData.format || 'mp4'
+                format: formData.format || 'mp4',
+                audio: formData.audio || 'stereo',
+                range: formData.range || 'sdr'
             };
             // The server enumerates the playlist before the download is added, which
             // can take a while on large playlists or slow networks. Give immediate
             // feedback so the UI does not look idle during that background work.
             if (type === 'playlist') {
                 this.uiManager.showNotification('Fetching playlist info, this can take a while for large playlists...', 'info');
-                await this.apiClient.startPlaylistDownload(downloadData.url, downloadData.type, downloadData.quality, downloadData.format);
+                await this.apiClient.startPlaylistDownload(downloadData.url, downloadData.type, downloadData.quality, downloadData.format, downloadData.audio, downloadData.range);
                 this.uiManager.showNotification('Playlist download started', 'success');
             }
             else if (type === 'first') {
                 this.uiManager.showNotification('Fetching first video...', 'info');
-                await this.apiClient.downloadFirstVideo(downloadData.url, downloadData.type, downloadData.quality, downloadData.format);
+                await this.apiClient.downloadFirstVideo(downloadData.url, downloadData.type, downloadData.quality, downloadData.format, downloadData.audio, downloadData.range);
                 this.uiManager.showNotification('First video download started', 'success');
             }
             await this.uiManager.resetForm('download-form');
+            document.getElementById('type-select')?.dispatchEvent(new Event('change'));
             this.uiManager.clearUrlValidation(); // Hide playlist options after successful start
             this.refreshDownloads(); // Non-blocking refresh
         }
@@ -455,6 +458,12 @@ export class DownloadManager {
         const progressEl = el.querySelector('.download-progress');
         if (!progressEl)
             return false;
+        const titleEl = el.querySelector('.download-title');
+        if (titleEl)
+            titleEl.textContent = download.title || 'Unknown Title';
+        const metaEl = el.querySelector('.download-meta');
+        if (metaEl)
+            metaEl.innerHTML = this.renderMetaContent(download, sectionKey);
         const percentage = this.parsePercentage(download.progress?.percentage);
         const bounded = Math.max(0, Math.min(100, percentage));
         const stage = this.getStageInfo(download, bounded, sectionKey, index);
@@ -480,7 +489,18 @@ export class DownloadManager {
         <div class="download-title">${this.escapeHtml(download.title || 'Unknown Title')}</div>
         <div class="download-url">${this.escapeHtml(download.url)}</div>
 
-        <div class="download-meta">
+        <div class="download-meta">${this.renderMetaContent(download, sectionKey)}</div>
+
+        ${download.error ? `<div class="download-error">${this.escapeHtml(download.error)}</div>` : ''}
+        ${this.renderProgress(download, percentage, sectionKey, index)}
+        ${this.renderDownloadActions(download, sectionKey)}
+      </div>
+    `;
+    }
+    // Inner HTML of the meta row. Shared by the full render and the in-place
+    // patch, because title and quality arrive while a download is running.
+    renderMetaContent(download, sectionKey) {
+        return `
           <div class="flex flex-wrap items-center gap-2">
             ${this.renderStatusBadge(download.status)}
             <span class="text-sm text-secondary">${this.escapeHtml(download.type)}</span>
@@ -493,13 +513,7 @@ export class DownloadManager {
           <div class="text-sm text-secondary">
             ${this.uiManager.formatDate(this.getRelevantDate(download, sectionKey))}
           </div>
-        </div>
-
-        ${download.error ? `<div class="download-error">${this.escapeHtml(download.error)}</div>` : ''}
-        ${this.renderProgress(download, percentage, sectionKey, index)}
-        ${this.renderDownloadActions(download, sectionKey)}
-      </div>
-    `;
+        `;
     }
     // Shows the final file size on completed entries, e.g. "1.2 GB".
     renderFileSize(download) {

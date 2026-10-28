@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -121,12 +122,14 @@ func (dm *DownloadManager) AddDownload(req core.DownloadRequest) (*core.Download
 		return nil, ErrAlreadyProcessing
 	}
 
-	// Check if this URL with same type/quality/format is already present
+	// Check if this URL with the same download settings is already present
 	for _, download := range dm.downloads {
 		if download.URL == req.URL &&
 			download.Type == req.Type &&
 			download.Quality == req.Quality &&
-			download.Format == req.Format {
+			download.Format == req.Format &&
+			cmp.Or(download.Audio, "stereo") == cmp.Or(req.Audio, "stereo") &&
+			cmp.Or(download.Range, "sdr") == cmp.Or(req.Range, "sdr") {
 
 			// Provide specific error message based on status
 			switch download.Status {
@@ -153,6 +156,8 @@ func (dm *DownloadManager) AddDownload(req core.DownloadRequest) (*core.Download
 		Type:      req.Type,
 		Quality:   req.Quality,
 		Format:    req.Format,
+		Audio:     req.Audio,
+		Range:     req.Range,
 		Status:    core.StatusQueued,
 		CreatedAt: time.Now(),
 	}
@@ -234,6 +239,8 @@ func (dm *DownloadManager) AddPlaylistDownload(req core.DownloadRequest) (*core.
 			Type:      req.Type,
 			Quality:   req.Quality,
 			Format:    req.Format,
+			Audio:     req.Audio,
+			Range:     req.Range,
 			Status:    core.StatusQueued,
 			Title:     item.Title,
 			CreatedAt: time.Now(),
@@ -924,6 +931,8 @@ func (dm *DownloadManager) processDownload(download *core.Download) bool {
 		Type:                     download.Type,
 		Quality:                  download.Quality,
 		Format:                   download.Format,
+		Audio:                    download.Audio,
+		Range:                    download.Range,
 		OutputDir:                outputDir,
 		ReencodeForCompatibility: compatibility,
 	}
@@ -966,6 +975,8 @@ func (dm *DownloadManager) processDownload(download *core.Download) bool {
 			log.Printf("[MANAGER] Download %s: codec probe failed: %v", download.ID, probeErr)
 		} else {
 			media = probed
+			completedDownload.OutputPath = dm.applyQualityName(completedDownload.OutputPath, media)
+			completedDownload.Filename = filepath.Base(completedDownload.OutputPath)
 		}
 	}
 
@@ -1022,6 +1033,31 @@ func (dm *DownloadManager) processDownload(download *core.Download) bool {
 	dm.mutex.Unlock()
 	progressWG.Wait()
 	return true
+}
+
+// applyQualityName renames a finished file to carry its measured quality
+// (see core.QualityFilename) when the setting is on. It never overwrites an
+// existing file and returns the original path if the rename is skipped.
+func (dm *DownloadManager) applyQualityName(path string, media core.MediaInfo) string {
+	dm.mutex.RLock()
+	enabled := dm.config != nil && dm.config.QualityInFilename
+	dm.mutex.RUnlock()
+	if !enabled || path == "" {
+		return path
+	}
+	target := core.QualityFilename(path, media)
+	if target == path {
+		return path
+	}
+	if _, err := os.Stat(target); err == nil {
+		log.Printf("[MANAGER] Not adding quality to %s: %s already exists", filepath.Base(path), filepath.Base(target))
+		return path
+	}
+	if err := os.Rename(path, target); err != nil {
+		log.Printf("[MANAGER] Failed to add quality to %s: %v", filepath.Base(path), err)
+		return path
+	}
+	return target
 }
 
 // videoIsCompatible reports whether a download needs no compatibility conversion.
@@ -1227,6 +1263,7 @@ func (dm *DownloadManager) finishConvert(id string, prevStatus core.DownloadStat
 		dm.mutex.RUnlock()
 		if result, perr := downloader.ProbeMedia(newPath); perr == nil {
 			media, probed = result, true
+			newPath = dm.applyQualityName(newPath, media)
 		}
 	}
 

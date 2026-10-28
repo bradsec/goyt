@@ -21,6 +21,8 @@ type Config struct {
 	DefaultVideoFormat       string `json:"default_video_format"`
 	DefaultAudioFormat       string `json:"default_audio_format"`
 	DefaultVideoQuality      string `json:"default_video_quality"`
+	DefaultAudio             string `json:"default_audio"`
+	DefaultVideoRange        string `json:"default_video_range"`
 	VerboseLogging           bool   `json:"verbose_logging"`
 	CompletedFileExpiryHours int    `json:"completed_file_expiry_hours"`
 	EnableHardwareAccel      bool   `json:"enable_hardware_acceleration"`
@@ -30,6 +32,9 @@ type Config struct {
 	// container by stream copy, which is far faster, especially for several
 	// concurrent downloads. Audio extraction is unaffected.
 	ReencodeForCompatibility bool `json:"reencode_for_compatibility"`
+	// QualityInFilename appends the measured quality to saved filenames, e.g.
+	// "title [4K HDR 5.1 384kbps].mp4". On by default.
+	QualityInFilename bool `json:"quality_in_filename"`
 	// Network operation timeouts in seconds. Slow networks or large playlists
 	// may need these raised. PlaylistLoadTimeoutSeconds bounds playlist
 	// enumeration; DownloadStartTimeoutSeconds bounds the video-info probe done
@@ -53,11 +58,14 @@ func DefaultConfig() *Config {
 		DefaultVideoFormat:          "mp4",
 		DefaultAudioFormat:          "mp3",
 		DefaultVideoQuality:         "1080p",
+		DefaultAudio:                "stereo",
+		DefaultVideoRange:           "sdr",
 		VerboseLogging:              false,
 		CompletedFileExpiryHours:    72,
 		EnableHardwareAccel:         false,
 		OptimizeForLowPower:         false,
 		ReencodeForCompatibility:    false,
+		QualityInFilename:           true,
 		PlaylistLoadTimeoutSeconds:  180,
 		DownloadStartTimeoutSeconds: 60,
 	}
@@ -146,6 +154,12 @@ func (c *Config) Validate() error {
 
 	if c.DefaultAudioFormat == "" {
 		return fmt.Errorf("default_audio_format cannot be empty")
+	}
+	if c.DefaultAudio != "stereo" && c.DefaultAudio != "surround" {
+		return fmt.Errorf("default_audio must be stereo or surround")
+	}
+	if c.DefaultVideoRange != "sdr" && c.DefaultVideoRange != "hdr" {
+		return fmt.Errorf("default_video_range must be sdr or hdr")
 	}
 
 	if c.Port <= 0 || c.Port > 65535 {

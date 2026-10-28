@@ -356,12 +356,18 @@ export class UIManager {
                 const typeSelect = form.querySelector('#type-select');
                 const qualitySelect = form.querySelector('#quality-select');
                 const formatSelect = form.querySelector('#format-select');
+                const audioSelect = form.querySelector('#audio-select');
+                const rangeSelect = form.querySelector('#range-select');
                 if (typeSelect) {
                     typeSelect.value = 'video'; // Always default to video
                 }
                 if (qualitySelect) {
                     qualitySelect.value = stringProperty(config, 'default_video_quality') || '1080p';
                 }
+                if (audioSelect)
+                    audioSelect.value = stringProperty(config, 'default_audio') || 'stereo';
+                if (rangeSelect)
+                    rangeSelect.value = stringProperty(config, 'default_video_range') || 'sdr';
                 if (formatSelect) {
                     // Update format options first based on type
                     this.updateFormatOptions('video');
@@ -380,6 +386,12 @@ export class UIManager {
                     qualitySelect.value = '1080p';
                 if (formatSelect)
                     formatSelect.value = 'mp4';
+                const audioSelect = form.querySelector('#audio-select');
+                const rangeSelect = form.querySelector('#range-select');
+                if (audioSelect)
+                    audioSelect.value = 'stereo';
+                if (rangeSelect)
+                    rangeSelect.value = 'sdr';
             }
         }
         else {

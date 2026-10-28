@@ -395,6 +395,8 @@ export class UIManager {
         const typeSelect = form.querySelector<HTMLSelectElement>('#type-select');
         const qualitySelect = form.querySelector<HTMLSelectElement>('#quality-select');
         const formatSelect = form.querySelector<HTMLSelectElement>('#format-select');
+        const audioSelect = form.querySelector<HTMLSelectElement>('#audio-select');
+        const rangeSelect = form.querySelector<HTMLSelectElement>('#range-select');
 
         if (typeSelect) {
           typeSelect.value = 'video'; // Always default to video
@@ -403,6 +405,8 @@ export class UIManager {
         if (qualitySelect) {
           qualitySelect.value = stringProperty(config, 'default_video_quality') || '1080p';
         }
+        if (audioSelect) audioSelect.value = stringProperty(config, 'default_audio') || 'stereo';
+        if (rangeSelect) rangeSelect.value = stringProperty(config, 'default_video_range') || 'sdr';
 
         if (formatSelect) {
           // Update format options first based on type
@@ -420,6 +424,10 @@ export class UIManager {
         if (typeSelect) typeSelect.value = 'video';
         if (qualitySelect) qualitySelect.value = '1080p';
         if (formatSelect) formatSelect.value = 'mp4';
+        const audioSelect = form.querySelector<HTMLSelectElement>('#audio-select');
+        const rangeSelect = form.querySelector<HTMLSelectElement>('#range-select');
+        if (audioSelect) audioSelect.value = 'stereo';
+        if (rangeSelect) rangeSelect.value = 'sdr';
       }
     } else {
       // No API client, just reset to first options

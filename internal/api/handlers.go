@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -124,6 +125,8 @@ type downloadRequest struct {
 	Type    string `json:"type"`    // "video" or "audio"
 	Quality string `json:"quality"` // "best", "worst", "720p", etc.
 	Format  string `json:"format"`  // "mp4", "mp3", etc.
+	Audio   string `json:"audio"`
+	Range   string `json:"range"`
 }
 
 // decodeDownloadRequest parses and validates the request body shared by the
@@ -160,6 +163,14 @@ func decodeDownloadRequest(w http.ResponseWriter, r *http.Request) (downloadRequ
 		WriteValidationError(w, "invalid quality")
 		return req, false
 	}
+	if req.Audio != "" && req.Audio != "stereo" && req.Audio != "surround" {
+		WriteValidationError(w, "invalid audio")
+		return req, false
+	}
+	if req.Range != "" && req.Range != "sdr" && req.Range != "hdr" {
+		WriteValidationError(w, "invalid range")
+		return req, false
+	}
 	return req, true
 }
 
@@ -176,6 +187,8 @@ func (h *Handler) toCoreRequest(req downloadRequest) core.DownloadRequest {
 		Type:      req.downloadType(),
 		Quality:   req.Quality,
 		Format:    req.Format,
+		Audio:     req.Audio,
+		Range:     req.Range,
 		OutputDir: h.currentConfig().DownloadPath,
 	}
 }
@@ -277,6 +290,12 @@ func (h *Handler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 	newConfig.YtDlpPath = current.YtDlpPath
 	newConfig.FfmpegPath = current.FfmpegPath
 	newConfig.CookiesFilePath = current.CookiesFilePath
+	if newConfig.DefaultAudio == "" {
+		newConfig.DefaultAudio = cmp.Or(current.DefaultAudio, "stereo")
+	}
+	if newConfig.DefaultVideoRange == "" {
+		newConfig.DefaultVideoRange = cmp.Or(current.DefaultVideoRange, "sdr")
+	}
 
 	if err := newConfig.Validate(); err != nil {
 		WriteValidationError(w, fmt.Sprintf("Configuration validation failed: %v", err))

@@ -236,7 +236,7 @@ export class SettingsManager {
             }
         }
         // Handle checkboxes (they won't be in formData if unchecked)
-        const checkboxFields = ['verbose_logging', 'enable_hardware_acceleration', 'optimize_for_low_power', 'reencode_for_compatibility'];
+        const checkboxFields = ['verbose_logging', 'enable_hardware_acceleration', 'optimize_for_low_power', 'reencode_for_compatibility', 'quality_in_filename'];
         checkboxFields.forEach(field => {
             if (field in this.settings) {
                 newSettings[field] = formData.has(field);
@@ -422,11 +422,14 @@ export class SettingsManager {
             default_video_format: 'mp4',
             default_audio_format: 'mp3',
             default_video_quality: '1080p',
+            default_audio: 'stereo',
+            default_video_range: 'sdr',
             verbose_logging: false,
             completed_file_expiry_hours: 72,
             enable_hardware_acceleration: false,
             optimize_for_low_power: false,
             reencode_for_compatibility: false,
+            quality_in_filename: true,
             playlist_load_timeout_seconds: 180,
             download_start_timeout_seconds: 60
         };
@@ -445,8 +448,23 @@ export class SettingsManager {
     // Utility methods
     updateCompatibilityNotice() {
         const notice = document.getElementById('compatibility-notice');
+        // Compatibility mode only re-encodes video, so audio-only downloads keep
+        // their audio quality choice.
+        const isVideo = document.getElementById('type-select')?.value !== 'audio';
+        const enabled = this.settings.reencode_for_compatibility === true && isVideo;
         if (notice)
-            notice.hidden = this.settings.reencode_for_compatibility !== true;
+            notice.hidden = !enabled;
+        for (const id of ['audio-select', 'range-select']) {
+            const select = document.getElementById(id);
+            if (select) {
+                if (enabled)
+                    select.value = id === 'audio-select' ? 'stereo' : 'sdr';
+                select.disabled = enabled;
+            }
+        }
+        const webmHint = document.getElementById('webm-surround-hint');
+        if (webmHint && enabled)
+            webmHint.hidden = true;
     }
     getSetting(key, defaultValue = null) {
         return this.settings[key] ?? defaultValue;

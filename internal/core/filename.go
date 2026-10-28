@@ -1,6 +1,7 @@
 package core
 
 import (
+	"path/filepath"
 	"regexp"
 	"strings"
 	"unicode"
@@ -91,4 +92,41 @@ func isASCIIAlnum(s string) bool {
 		}
 	}
 	return true
+}
+
+// qualitySuffixRe matches a suffix written by QualityFilename, so a later
+// rename (after Convert) replaces it instead of stacking a second one.
+var qualitySuffixRe = regexp.MustCompile(`^(.*) \[(?:(?:8K|4K|\d{3,4}p|HDR|mono|stereo|5\.1|7\.1|\d+ channels|\d+kbps) ?)+\]$`)
+
+// QualityFilename returns path with the measured quality appended before the
+// extension, e.g. "dino [4K HDR 5.1 384kbps].mp4". Labels come from ffprobe,
+// so the suffix only ever holds letters, digits, spaces and the dot in "5.1".
+// It returns path unchanged when nothing is known.
+func QualityFilename(path string, info MediaInfo) string {
+	var parts []string
+	if info.Resolution != "" {
+		parts = append(parts, info.Resolution)
+	}
+	if info.HDR {
+		parts = append(parts, "HDR")
+	}
+	switch info.AudioChannels {
+	case "Stereo", "Mono":
+		parts = append(parts, strings.ToLower(info.AudioChannels))
+	case "":
+	default:
+		parts = append(parts, info.AudioChannels)
+	}
+	if info.AudioBitrate != "" {
+		parts = append(parts, strings.ReplaceAll(info.AudioBitrate, " ", ""))
+	}
+	if len(parts) == 0 {
+		return path
+	}
+	ext := filepath.Ext(path)
+	base := strings.TrimSuffix(path, ext)
+	if m := qualitySuffixRe.FindStringSubmatch(base); m != nil {
+		base = m[1]
+	}
+	return base + " [" + strings.Join(parts, " ") + "]" + ext
 }

@@ -205,10 +205,10 @@ func TestVideoFormatPrefersResolutionBeforeCodec(t *testing.T) {
 	for _, tc := range []struct {
 		name, quality, format, selector, sort string
 	}{
-		{"mp4 best", "best", FormatMP4, "bestvideo+bestaudio/best", "res,+codec:avc:m4a"},
-		{"mp4 4k", "4k", FormatMP4, "bestvideo[height<=2160]+bestaudio/best[height<=2160]/best", "res,+codec:avc:m4a"},
-		{"webm best", "best", FormatWEBM, "bestvideo+bestaudio/best", "res,+codec:vp9:opus"},
-		{"webm 4k", "4k", FormatWEBM, "bestvideo[height<=2160]+bestaudio/best[height<=2160]/best", "res,+codec:vp9:opus"},
+		{"mp4 best", "best", FormatMP4, "bestvideo+bestaudio/best", "res,+hdr,channels:2,+codec:avc:m4a"},
+		{"mp4 4k", "4k", FormatMP4, "bestvideo[height<=2160]+bestaudio/best[height<=2160]/best", "res,+hdr,channels:2,+codec:avc:m4a"},
+		{"webm best", "best", FormatWEBM, "bestvideo+bestaudio/best", "res,+hdr,channels:2,+codec:vp9:opus"},
+		{"webm 4k", "4k", FormatWEBM, "bestvideo[height<=2160]+bestaudio/best[height<=2160]/best", "res,+hdr,channels:2,+codec:vp9:opus"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := DownloadRequest{URL: "https://example.com/v", Type: VideoDownload, Quality: tc.quality, Format: tc.format}
@@ -230,7 +230,7 @@ func TestCompatibilityFormatSelection(t *testing.T) {
 		{"best", "best", FormatMP4, true, "bestvideo[vcodec^=avc1][dynamic_range=SDR]+bestaudio[acodec^=mp4a][audio_channels<=2]/bestvideo[dynamic_range=SDR]+bestaudio/best", "res:1080,+hdr,+codec:avc:m4a"},
 		{"720p", "720p", FormatMP4, true, "bestvideo[vcodec^=avc1][dynamic_range=SDR]+bestaudio[acodec^=mp4a][audio_channels<=2]/bestvideo[dynamic_range=SDR]+bestaudio/best", "res:720,+hdr,+codec:avc:m4a"},
 		{"webm becomes mp4", "best", FormatWEBM, true, "bestvideo[vcodec^=avc1][dynamic_range=SDR]+bestaudio[acodec^=mp4a][audio_channels<=2]/bestvideo[dynamic_range=SDR]+bestaudio/best", "res:1080,+hdr,+codec:avc:m4a"},
-		{"off", "best", FormatMP4, false, "bestvideo+bestaudio/best", "res,+codec:avc:m4a"},
+		{"off", "best", FormatMP4, false, "bestvideo+bestaudio/best", "res,+hdr,channels:2,+codec:avc:m4a"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := DownloadRequest{URL: "https://example.com/v", Type: VideoDownload, Quality: tc.quality, Format: tc.format, ReencodeForCompatibility: tc.compat}
@@ -242,6 +242,52 @@ func TestCompatibilityFormatSelection(t *testing.T) {
 				t.Fatalf("compatibility output must be MP4: %v", args)
 			}
 		})
+	}
+}
+
+func TestSelectionArgsAudioAndRange(t *testing.T) {
+	d := NewDownloader("yt-dlp", "ffmpeg", "", false, false)
+	for _, format := range []string{FormatMP4, FormatWEBM, "mkv"} {
+		for _, audio := range []string{"stereo", "surround"} {
+			for _, videoRange := range []string{"sdr", "hdr"} {
+				t.Run(format+"/"+audio+"/"+videoRange, func(t *testing.T) {
+					req := DownloadRequest{Type: VideoDownload, Quality: "1080p", Format: format, Audio: audio, Range: videoRange}
+					args := d.selectionArgs(req)
+					wantSort := "res,"
+					if videoRange == "sdr" {
+						wantSort += "+"
+					}
+					wantSort += "hdr,channels"
+					if audio == "stereo" {
+						wantSort += ":2"
+					}
+					if format == FormatMP4 {
+						wantSort += ",+codec:avc:m4a"
+					}
+					if format == FormatWEBM {
+						wantSort += ",+codec:vp9:opus"
+					}
+					if !argHasValue(args, "--format-sort", wantSort) {
+						t.Errorf("args=%v; want sort %q", args, wantSort)
+					}
+					selector := "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
+					if format == FormatWEBM && audio == "surround" {
+						selector = "bestvideo[height<=1080]+bestaudio[acodec^=opus]/bestvideo[height<=1080]+bestaudio[acodec=vorbis]/" + selector
+					}
+					if !argHasValue(args, "--format", selector) {
+						t.Errorf("args=%v; want selector %q", args, selector)
+					}
+				})
+			}
+		}
+	}
+	compat := d.selectionArgs(DownloadRequest{Type: VideoDownload, Quality: "best", Format: FormatWEBM, Audio: "surround", Range: "hdr", ReencodeForCompatibility: true})
+	if !argHasValue(compat, "--format-sort", "res:1080,+hdr,+codec:avc:m4a") {
+		t.Errorf("compat args=%v", compat)
+	}
+	worst := d.selectionArgs(DownloadRequest{Type: VideoDownload, Quality: "worst", Format: FormatMP4, Audio: "surround", Range: "hdr"})
+	if !argHasValue(worst, "--format", "worstvideo+worstaudio/worst") || hasArg(worst, "--format-sort") {
+		t.Errorf("worst args=%v", worst)
 	}
 }
 
@@ -483,5 +529,36 @@ func TestDownloadKeepsFinalYtDlpError(t *testing.T) {
 			}
 			t.Fatalf("run %d: error = %q; want the yt-dlp ERROR text", i, got)
 		}
+	}
+}
+
+func TestAudioOnlyChannelSelection(t *testing.T) {
+	d := NewDownloader("yt-dlp", "ffmpeg", "", false, false)
+	for _, tc := range []struct {
+		audio, format, sort string
+		keepsChannels       bool
+	}{
+		{"", "mp3", "channels:2", false},
+		{"stereo", "flac", "channels:2", false},
+		{"surround", "m4a", "channels", true},
+		{"surround", "flac", "channels", true},
+		{"surround", "wav", "channels", true},
+		// MP3 holds at most two channels, so surround still downmixes.
+		{"surround", "mp3", "channels", false},
+	} {
+		t.Run(tc.audio+"/"+tc.format, func(t *testing.T) {
+			req := DownloadRequest{URL: "https://example.com/a", Type: AudioDownload, Format: tc.format, Audio: tc.audio}
+			args := d.buildYtDlpArgs(req, &Download{ID: "a", Title: "Track"})
+			if !argHasValue(args, "--format-sort", tc.sort) {
+				t.Errorf("args = %v, want --format-sort %q", args, tc.sort)
+			}
+			ff := d.buildAudioFFmpegArgs(tc.format, "progress.txt", tc.audio == "surround")
+			if got := !strings.Contains(ff, "-ac 2"); got != tc.keepsChannels {
+				t.Errorf("ffmpeg args %q: keeps source channels = %v, want %v", ff, got, tc.keepsChannels)
+			}
+		})
+	}
+	if ff := d.buildAudioFFmpegArgs("m4a", "p", true); !strings.Contains(ff, "-b:a 384k") {
+		t.Errorf("surround m4a args %q, want 384k AAC", ff)
 	}
 }

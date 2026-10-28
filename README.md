@@ -2,11 +2,12 @@
 
 A self-hosted, cross-platform web interface for yt-dlp, written in Go. Download video and audio from any site yt-dlp supports, with ffmpeg handling merging and optional re-encoding.
 
-![goyt web UI](internal/ui/assets/img/ogimage.png)
+![goyt web UI](docs/screenshot.png)
 
 ## Features
 
 - **Multi-format downloads**: MP4, MKV, WebM, AVI video and MP3, M4A, WAV, FLAC audio
+- **Download options**: For video, Intake offers **Video quality** (Highest available, 4K, 1440p, 1080p, 720p, 480p, 360p, Smallest size), **Video range** (SDR, or HDR when available), **Audio quality** (Stereo, or Surround with 5.1 when the site offers it) and **Format**. For audio only, it shows **Audio quality** and **Format**. Unavailable choices fall back to stereo SDR. Compatibility mode always uses stereo SDR for video. WebM keeps surround only for Opus tracks, and MP3 is always stereo; use MP4, MKV, M4A, FLAC or WAV for 5.1
 - **Fast by default**: Video is remuxed into the chosen container without re-encoding; optional H.264 + AAC transcode for older devices
 - **Best available resolution**: MP4 and WebM selection prioritizes resolution, then prefers compatible source codecs at the same resolution. Higher-resolution MP4 downloads can contain VP9 or AV1 video. Enable compatibility mode to prefer direct H.264 + AAC SDR at 1080p or lower, with conversion when needed
 - **Terminal-inspired web UI**: Single dark theme, JetBrains Mono, responsive and mobile-friendly
@@ -129,6 +130,9 @@ The application creates a `config.json` file on first run with default settings:
   "default_video_format": "mp4",
   "default_audio_format": "mp3",
   "default_video_quality": "1080p",
+  "default_audio": "stereo",
+  "default_video_range": "sdr",
+  "quality_in_filename": true,
   "verbose_logging": false,
   "completed_file_expiry_hours": 72,
   "enable_hardware_acceleration": false,
@@ -140,6 +144,9 @@ The application creates a `config.json` file on first run with default settings:
 ```
 
 ### Configuration Options
+- **default_audio**: Default audio quality, `stereo` or `surround` (default `stereo`), for video and audio downloads
+- **default_video_range**: Default video range for video downloads, `sdr` or `hdr` (default `sdr`)
+- **quality_in_filename**: Append the measured quality to saved filenames after download and after Convert, e.g. `title [4K HDR 5.1 384kbps].mp4` or `song [stereo 245kbps].mp3` (default `true`). The rename never overwrites an existing file
 - **download_path**: Directory for downloaded files
 - **max_concurrent_downloads**: Number of simultaneous downloads (1-10)
 - **yt_dlp_path**: Path to yt-dlp binary (auto-managed)
@@ -197,6 +204,11 @@ Login attempts are limited to 10 per minute per client IP. State-changing API re
 - `POST /api/downloads` - Start a new download
 - `POST /api/downloads/playlist` - Start playlist download
 - `POST /api/downloads/first-video` - Download first video from playlist
+- Download request body for these endpoints:
+  ```json
+  {"url": "https://www.youtube.com/watch?v=...", "type": "video", "quality": "best", "format": "mp4", "audio": "surround", "range": "hdr"}
+  ```
+  `type` is `video` or `audio`. `quality` is `best` (Highest available), `4k`, `2k`, `1080p`, `720p`, `480p`, `360p` or `worst`; audio downloads ignore it. `format` is `mp4`, `mkv`, `webm` or `avi` for video, and `mp3`, `m4a`, `wav` or `flac` for audio. Optional `audio` is `stereo` (default) or `surround`: surround picks a 5.1 source when one exists and keeps it for MP4, MKV, M4A, FLAC and WAV, while MP3 is always stereo. Optional `range` is `sdr` (default) or `hdr` and applies to video only. Compatibility mode forces stereo SDR for video. Invalid values return `400`
 - `POST /api/validate` - Validate URL and detect playlists
 
 ### Download Management
