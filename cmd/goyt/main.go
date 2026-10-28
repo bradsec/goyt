@@ -174,7 +174,7 @@ func main() {
 }
 
 // runSetPass prompts for a new web UI password (hidden input, confirmed) and
-// writes its hash plus a session secret to the config file.
+// writes its hash plus a fresh session secret to the config file.
 func runSetPass(argv []string) {
 	fs := flag.NewFlagSet("setpass", flag.ExitOnError)
 	configPath := fs.String("config", "config.json", "Path to configuration file")
@@ -198,14 +198,14 @@ func runSetPass(argv []string) {
 		os.Exit(1)
 	}
 	cfg.WebUIPasswordHash = hash
-	if cfg.SessionSecret == "" {
-		secret, err := config.GenerateSessionSecret()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to generate session secret: %v\n", err)
-			os.Exit(1)
-		}
-		cfg.SessionSecret = secret
+	// Sessions are stateless signed tokens, so a fresh secret is the only way
+	// to sign out sessions issued under the previous password.
+	secret, err := config.GenerateSessionSecret()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to generate session secret: %v\n", err)
+		os.Exit(1)
 	}
+	cfg.SessionSecret = secret
 	if err := cfg.Save(*configPath); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to save config: %v\n", err)
 		os.Exit(1)
