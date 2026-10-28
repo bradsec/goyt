@@ -244,14 +244,22 @@ func (d *Downloader) buildConvertArgs(srcPath, dstPath, progressFile string, med
 		cap = 1080
 	}
 	filter := fmt.Sprintf("scale=w='trunc(iw*min(1\\,%d/min(iw\\,ih))/2)*2':h='trunc(ih*min(1\\,%d/min(iw\\,ih))/2)*2'", cap, cap)
+	width, height := 0, 0
 	if media.Width >= 2 && media.Height >= 2 {
 		factor := min(1, float64(cap)/float64(min(media.Width, media.Height)))
-		width := int(float64(media.Width)*factor) / 2 * 2
-		height := int(float64(media.Height)*factor) / 2 * 2
+		width = int(float64(media.Width)*factor) / 2 * 2
+		height = int(float64(media.Height)*factor) / 2 * 2
 		filter = fmt.Sprintf("scale=%d:%d", width, height)
 	}
 	if media.HDR && toneMap {
-		filter = "zscale=transfer=linear:npl=100,format=gbrpf32le,tonemap=tonemap=hable,zscale=primaries=bt709:transfer=bt709:matrix=bt709:range=tv," + filter
+		const toneMapChain = "transfer=linear:npl=100,format=gbrpf32le,tonemap=tonemap=hable,zscale=primaries=bt709:transfer=bt709:matrix=bt709:range=tv"
+		if width > 0 {
+			// Scale in the first zscale so the float tone-map runs on the
+			// output size: about 3x faster than tone-mapping at 4K.
+			filter = fmt.Sprintf("zscale=w=%d:h=%d:%s,format=yuv420p", width, height, toneMapChain)
+		} else {
+			filter = "zscale=" + toneMapChain + "," + filter
+		}
 	}
 	args = append(args, "-vf", filter)
 	if media.HDR && toneMap {
@@ -324,7 +332,7 @@ func (d *Downloader) ConvertToH264AAC(
 
 	duration := d.probeDurationSeconds(src)
 	monitorWG.Go(func() {
-		d.monitorFFmpegProgress(monitorCtx, progressFile, progressChan, download.ID, duration)
+		d.monitorFFmpegProgress(monitorCtx, progressFile, progressChan, download.ID, duration, true)
 	})
 
 	args := d.buildConvertArgs(src, tmpPath, progressFile, media, toneMap, download.CompatibilityCap)

@@ -2,6 +2,7 @@ package core
 
 import (
 	"archive/zip"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,5 +150,27 @@ func TestParseFFmpegProgressReportsWallTimeAndSpeedETA(t *testing.T) {
 	}
 	if p.ProcessingTime != "58s" {
 		t.Errorf("ProcessingTime = %q, want elapsed wall time 58s", p.ProcessingTime)
+	}
+}
+
+// Until ffmpeg writes its first progress (4K AV1 HDR can take a while), the
+// monitor still reports that the encoder is starting, with elapsed time.
+func TestFFmpegMonitorReportsStartingBeforeFirstProgress(t *testing.T) {
+	d := NewDownloader("yt-dlp", "ffmpeg", "", false, false)
+	ch := make(chan DownloadProgress, 8)
+	ctx, cancel := context.WithTimeout(context.Background(), 1300*time.Millisecond)
+	defer cancel()
+	d.monitorFFmpegProgress(ctx, filepath.Join(t.TempDir(), "missing.txt"), ch, "id", 60, true)
+	close(ch)
+	var got []DownloadProgress
+	for p := range ch {
+		got = append(got, p)
+	}
+	if len(got) == 0 {
+		t.Fatal("no progress sent while ffmpeg had not reported yet")
+	}
+	last := got[len(got)-1]
+	if last.Phase != "starting" || !strings.Contains(last.FFmpegProgress, "Starting encoder") || last.ProcessingTime == "" {
+		t.Fatalf("progress = %+v, want starting phase with elapsed time", last)
 	}
 }

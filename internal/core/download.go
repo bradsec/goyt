@@ -377,7 +377,7 @@ func (d *Downloader) Download(
 	if download.ProgressFile != "" {
 		const fallbackDuration = 300.0 // used only until the real duration is parsed
 		monitorWG.Go(func() {
-			d.monitorFFmpegProgress(monitorCtx, download.ProgressFile, progressChan, download.ID, fallbackDuration)
+			d.monitorFFmpegProgress(monitorCtx, download.ProgressFile, progressChan, download.ID, fallbackDuration, false)
 		})
 	}
 
@@ -2171,6 +2171,11 @@ func (d *Downloader) GetPlaylistItems(url string) ([]PlaylistItem, error) {
 }
 
 // monitorFFmpegProgress monitors the FFMPEG progress file for real-time progress updates
+// monitorFFmpegProgress follows ffmpeg's -progress file. announceStart sends a
+// "starting" heartbeat until the first frame is encoded; the download path
+// starts this monitor before yt-dlp hands off to ffmpeg, so it passes false
+// to keep download progress intact.
+
 // conversionETA converts remaining media seconds into wall-clock time using
 // ffmpeg's speed ("0.405x" means 0.405 media seconds per second). Without a
 // usable speed it falls back to the media time.
@@ -2195,6 +2200,7 @@ func (d *Downloader) monitorFFmpegProgress(
 	progressChan chan<- DownloadProgress,
 	downloadID string,
 	duration float64,
+	announceStart bool,
 ) {
 	// Always remove the progress file when monitoring stops, regardless of
 	// whether ffmpeg ever wrote to it.
@@ -2215,6 +2221,20 @@ func (d *Downloader) monitorFFmpegProgress(
 		}
 
 		// Check if file exists and has grown
+		// Until the first frame is encoded ffmpeg reports nothing useful,
+		// and decoding plus tone-mapping 4K HDR can take a while to get there.
+		if f := ffmpegData["frame"]; announceStart && (f == "" || f == "0") {
+			starting := DownloadProgress{
+				Phase:          "starting",
+				FFmpegProgress: "Starting encoder: decoding and filtering the first frames...",
+				ProcessingTime: elapsedLabel(time.Since(started)),
+			}
+			select {
+			case progressChan <- starting:
+			default:
+			}
+		}
+
 		fileInfo, err := os.Stat(progressFile)
 		if err != nil {
 			continue // File doesn't exist yet
@@ -2247,7 +2267,7 @@ func (d *Downloader) monitorFFmpegProgress(
 		}
 
 		// Parse progress data
-		if len(ffmpegData) > 0 {
+		if f := ffmpegData["frame"]; len(ffmpegData) > 0 && f != "" && f != "0" {
 			d.parseFFmpegProgressData(ffmpegData, progressChan, downloadID, duration, started)
 		}
 

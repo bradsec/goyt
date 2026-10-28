@@ -5,6 +5,11 @@ versioning (CalVer): `YYYY.MM.DD`.
 
 ## [Unreleased]
 
+### Fixed
+
+- Convert shows "Starting encoder" with elapsed time until ffmpeg encodes its first frame, instead of a silent bar.
+- HDR to SDR conversion scales to the output size before tone mapping, about 3x faster for 4K sources.
+
 ## [2026.10.28.4]
 
 ### Fixed

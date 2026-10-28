@@ -772,6 +772,9 @@ export class DownloadManager {
     if (download.status === 'paused') {
       return { label: `Paused at ${percentage.toFixed(0)}%`, indeterminate: false, showPercent: false };
     }
+    if (phase === 'starting') {
+      return { label: 'Starting encoder', indeterminate: true, showPercent: false };
+    }
     if (phase === 'finalizing') {
       return { label: 'Finalizing file', indeterminate: true, showPercent: false };
     }

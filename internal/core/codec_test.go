@@ -42,7 +42,8 @@ func TestConvertFilters(t *testing.T) {
 		wantScale   string
 		wantTonemap bool
 	}{
-		{"4K HDR", MediaInfo{Width: 3840, Height: 2160, HDR: true}, "scale=1920:1080", true},
+		// Scale inside the first zscale so the float tone-map runs at 1080p, not 4K.
+		{"4K HDR", MediaInfo{Width: 3840, Height: 2160, HDR: true}, "-vf zscale=w=1920:h=1080:transfer=linear", true},
 		{"portrait", MediaInfo{Width: 1080, Height: 1920}, "scale=1080:1920", false},
 		{"720p", MediaInfo{Width: 1280, Height: 720}, "scale=1280:720", false},
 		{"720p limit", MediaInfo{Width: 1920, Height: 1080}, "scale=1280:720", false},
