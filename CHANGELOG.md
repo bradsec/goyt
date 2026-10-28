@@ -11,6 +11,9 @@ versioning (CalVer): `YYYY.MM.DD`.
 - Paused and canceled downloads remain visible, URL validation ignores stale replies, and connection status recovers after a successful poll.
 - State-changing API requests with a cross-origin `Origin` header are rejected via Go's `http.CrossOriginProtection`.
 - `/api/login` is limited to 10 attempts per minute per client IP.
+- Responses send `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy: same-origin`.
+- Titles with a fake extension (for example `Clip./x`) can no longer inject path separators or yt-dlp template fields into the output filename.
+- Failed downloads keep yt-dlp's final `ERROR` message instead of sometimes showing only `exit status 1`.
 - `goyt setpass` now rotates the session secret, so changing the password signs out existing sessions.
 - Go toolchain 1.27.3 fixes 11 reachable standard library vulnerabilities; GitHub Actions and npm tooling updated to current releases.
 - Queue workers now claim downloads once, state saves are serialized, and temporary-file cleanup only matches the exact output filename.
