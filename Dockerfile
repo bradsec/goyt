@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Build stage: compile CSS assets and the Go binary.
-FROM golang:1.27.0-alpine AS builder
+FROM golang:1.27.3-alpine3.24 AS builder
 RUN apk add --no-cache nodejs npm
 WORKDIR /app
 
