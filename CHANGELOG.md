@@ -5,6 +5,8 @@ versioning (CalVer): `YYYY.MM.DD`.
 
 ## [Unreleased]
 
+## [2026.10.28.5]
+
 ### Fixed
 
 - Convert shows "Starting encoder" with elapsed time until ffmpeg encodes its first frame, instead of a silent bar.
