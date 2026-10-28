@@ -928,7 +928,7 @@ export class DownloadManager {
       const notice = document.createElement('div');
       notice.className = 'media-modal-notice';
       const intro = document.createElement('p');
-      intro.textContent = 'This file may not play in the browser:';
+      intro.textContent = 'Recommended: download this file and play it in a desktop player such as VLC or mpv, or on a TV. The browser may not handle it:';
       const list = document.createElement('ul');
       for (const risk of risks) {
         const item = document.createElement('li');
@@ -937,7 +937,7 @@ export class DownloadManager {
       }
       const hint = document.createElement('p');
       hint.className = 'text-sm text-secondary';
-      hint.textContent = 'Download it for a desktop player or TV, or use Convert for a 1080p H.264 + AAC copy.';
+      hint.textContent = 'To watch it here instead, use Convert to make a 1080p H.264 + AAC copy, or try Play anyway.';
       const actions = document.createElement('div');
       actions.className = 'flex items-center gap-2';
       const play = document.createElement('button');
