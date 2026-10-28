@@ -586,8 +586,16 @@ func (d *Downloader) buildYtDlpArgs(req DownloadRequest, download *Download) []s
 		}
 	} else {
 		// Video download - use natural format selection
-		videoFormat := d.getVideoFormat(req.Quality, req.Format)
+		videoFormat := d.getVideoFormat(req.Quality)
 		args = append(args, "--format", videoFormat)
+		if !strings.EqualFold(req.Quality, "worst") {
+			switch req.Format {
+			case FormatMP4:
+				args = append(args, "--format-sort", "res,+codec:avc:m4a")
+			case FormatWEBM:
+				args = append(args, "--format-sort", "res,+codec:vp9:opus")
+			}
+		}
 
 		// Always merge separate streams and remux into the chosen container by
 		// stream copy, which is far faster than re-encoding. When "Re-encode
@@ -737,31 +745,16 @@ func (d *Downloader) buildAudioFFmpegArgs(format string, progressFile string) st
 	}
 }
 
-func (d *Downloader) getVideoFormat(quality, format string) string {
+func (d *Downloader) getVideoFormat(quality string) string {
 	heights := map[string]int{
 		"4k": 2160, "2160p": 2160,
 		"2k": 1440, "1440p": 1440,
 		"1080p": 1080, "720p": 720, "480p": 480, "360p": 360,
 	}
 
-	// H.264 + AAC plays on effectively every device and merges into MP4 by
-	// stream copy, so prefer those source codecs when the target is MP4.
-	// VP9 + Opus is the native pairing for WebM. Always fall back to the
-	// unrestricted selector so downloads never fail on codec availability.
-	var vf, af string
-	switch format {
-	case FormatMP4:
-		vf, af = "[vcodec^=avc1]", "[acodec^=mp4a]"
-	case FormatWEBM:
-		vf, af = "[vcodec^=vp9]", "[acodec^=opus]"
-	}
-
 	q := strings.ToLower(quality)
 	switch q {
 	case "best", "":
-		if vf != "" {
-			return fmt.Sprintf("bestvideo%s+bestaudio%s/bestvideo+bestaudio/best", vf, af)
-		}
 		return "bestvideo+bestaudio/best"
 	case "worst":
 		return "worstvideo+worstaudio/worst"
@@ -778,11 +771,6 @@ func (d *Downloader) getVideoFormat(quality, format string) string {
 	// End every chain with an unrestricted "/best" so a height cap degrades to
 	// the best available format instead of failing with "Requested format is
 	// not available" when no stream satisfies the cap (common on Facebook).
-	if vf != "" {
-		return fmt.Sprintf(
-			"bestvideo[height<=%d]%s+bestaudio%s/bestvideo[height<=%d]+bestaudio/best[height<=%d]/best",
-			h, vf, af, h, h)
-	}
 	return fmt.Sprintf("bestvideo[height<=%d]+bestaudio/best[height<=%d]/best", h, h)
 }
 

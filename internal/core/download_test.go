@@ -171,10 +171,30 @@ func TestGetVideoFormatAlwaysFallsBackToBest(t *testing.T) {
 		{"best", FormatMP4},
 	}
 	for _, c := range cases {
-		got := d.getVideoFormat(c.quality, c.format)
+		got := d.getVideoFormat(c.quality)
 		if !strings.HasSuffix(got, "/best") {
-			t.Errorf("getVideoFormat(%q,%q) = %q; must end with /best fallback", c.quality, c.format, got)
+			t.Errorf("getVideoFormat(%q) = %q; must end with /best fallback", c.quality, got)
 		}
+	}
+}
+
+func TestVideoFormatPrefersResolutionBeforeCodec(t *testing.T) {
+	d := NewDownloader("yt-dlp", "ffmpeg", "", false, false)
+	for _, tc := range []struct {
+		name, quality, format, selector, sort string
+	}{
+		{"mp4 best", "best", FormatMP4, "bestvideo+bestaudio/best", "res,+codec:avc:m4a"},
+		{"mp4 4k", "4k", FormatMP4, "bestvideo[height<=2160]+bestaudio/best[height<=2160]/best", "res,+codec:avc:m4a"},
+		{"webm best", "best", FormatWEBM, "bestvideo+bestaudio/best", "res,+codec:vp9:opus"},
+		{"webm 4k", "4k", FormatWEBM, "bestvideo[height<=2160]+bestaudio/best[height<=2160]/best", "res,+codec:vp9:opus"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := DownloadRequest{URL: "https://example.com/v", Type: VideoDownload, Quality: tc.quality, Format: tc.format}
+			args := d.buildYtDlpArgs(req, &Download{ID: "abc", Title: "Clip"})
+			if !argHasValue(args, "--format", tc.selector) || !argHasValue(args, "--format-sort", tc.sort) {
+				t.Errorf("format selection = %v, want selector %q and sort %q", args, tc.selector, tc.sort)
+			}
+		})
 	}
 }
 
