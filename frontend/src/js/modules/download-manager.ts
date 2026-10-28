@@ -911,13 +911,50 @@ export class DownloadManager {
     title.textContent = download.title || download.filename || 'Media';
 
     const isAudio = download.type === 'audio';
-    const el = document.createElement(isAudio ? 'audio' : 'video');
-    el.controls = true;
-    el.autoplay = true;
-    el.className = isAudio ? 'media-modal-audio' : 'media-modal-video';
-    el.src = `/api/downloads/${downloadId}/stream`;
+    const startPlayback = () => {
+      const el = document.createElement(isAudio ? 'audio' : 'video');
+      el.controls = true;
+      el.autoplay = true;
+      el.className = isAudio ? 'media-modal-audio' : 'media-modal-video';
+      el.src = `/api/downloads/${downloadId}/stream`;
+      mount.replaceChildren(el);
+    };
 
-    mount.replaceChildren(el);
+    // Chrome on Linux has crashed the tab on 4K HDR + E-AC-3 files, and it
+    // cannot decode Dolby audio at all, so ask before handing such files to
+    // the browser instead of autoplaying them.
+    const risks = this.playbackRisks(download);
+    if (risks.length) {
+      const notice = document.createElement('div');
+      notice.className = 'media-modal-notice';
+      const intro = document.createElement('p');
+      intro.textContent = 'This file may not play in the browser:';
+      const list = document.createElement('ul');
+      for (const risk of risks) {
+        const item = document.createElement('li');
+        item.textContent = risk;
+        list.append(item);
+      }
+      const hint = document.createElement('p');
+      hint.className = 'text-sm text-secondary';
+      hint.textContent = 'Download it for a desktop player or TV, or use Convert for a 1080p H.264 + AAC copy.';
+      const actions = document.createElement('div');
+      actions.className = 'flex items-center gap-2';
+      const play = document.createElement('button');
+      play.type = 'button';
+      play.className = 'btn btn-secondary btn-sm';
+      play.textContent = 'Play anyway';
+      play.addEventListener('click', startPlayback);
+      const save = document.createElement('a');
+      save.className = 'btn btn-primary btn-sm';
+      save.href = `/api/downloads/${downloadId}/download`;
+      save.textContent = 'Download';
+      actions.append(save, play);
+      notice.append(intro, list, hint, actions);
+      mount.replaceChildren(notice);
+    } else {
+      startPlayback();
+    }
 
     if (!this._mediaModalWired) {
       const close = () => this.closeMediaPlayer();
@@ -930,6 +967,26 @@ export class DownloadManager {
     }
 
     modal.showModal();
+  }
+
+  // Reasons a completed file is likely to fail or crash in this browser's
+  // player, based on the probed codecs. Empty when playback looks safe.
+  playbackRisks(download: Download): string[] {
+    const risks: string[] = [];
+    const dolby: Record<string, [string, string]> = {
+      eac3: ['E-AC-3 (Dolby Digital Plus)', 'audio/mp4; codecs="ec-3"'],
+      ac3: ['AC-3 (Dolby Digital)', 'audio/mp4; codecs="ac-3"'],
+      dts: ['DTS', 'audio/mp4; codecs="dtsc"'],
+      truehd: ['Dolby TrueHD', 'audio/mp4; codecs="mlpa"'],
+    };
+    const audio = dolby[(download.audio_codec || '').toLowerCase()];
+    if (audio && document.createElement('audio').canPlayType(audio[1]) === '') {
+      risks.push(`${audio[0]} audio is not supported by this browser.`);
+    }
+    if (download.hdr) {
+      risks.push('HDR video can crash the browser tab or play with washed-out colours.');
+    }
+    return risks;
   }
 
   closeMediaPlayer(): void {

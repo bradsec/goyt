@@ -5,6 +5,10 @@ versioning (CalVer): `YYYY.MM.DD`.
 
 ## [Unreleased]
 
+### Fixed
+
+- The built-in player no longer autoplays files the browser is likely to mishandle. HDR video, or Dolby/DTS audio the browser cannot decode (Chrome on Linux has no E-AC-3/AC-3 decoder), now shows a notice with Download and Play anyway; Chrome had crashed the tab on 4K HDR + E-AC-3 files.
+
 ## [2026.10.28.2]
 
 ### Added
