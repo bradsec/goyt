@@ -22,11 +22,11 @@
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",
-    "@types/node": "^26.4.0",
-    "oxlint": "^1.80.0",
-    "puppeteer": "^25.9.0",
+    "@types/node": "^26.6.5",
+    "oxlint": "^1.90.0",
+    "puppeteer": "^25.16.0",
     "tailwindcss": "^4.3.3",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   },
   "dependencies": {
