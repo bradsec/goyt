@@ -5,6 +5,8 @@ versioning (CalVer): `YYYY.MM.DD`.
 
 ## [Unreleased]
 
+## [2026.10.28]
+
 ### Fixed
 
 - MP4 and WebM downloads now choose the highest available resolution before preferring container-friendly codecs. High-resolution VP9 or AV1 streams are no longer displaced by lower-resolution H.264 or VP9 streams. Downloads still remux by stream copy; optional compatibility re-encoding remains available.
