@@ -66,6 +66,19 @@ func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// SecurityHeaders sets response headers that stop MIME sniffing of served
+// media, block framing (clickjacking), and keep URLs out of Referer headers
+// sent to other sites. A CSP is omitted because the UI relies on inline styles.
+func SecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "same-origin")
+		next.ServeHTTP(w, r)
+	})
+}
+
 // PanicRecoveryMiddleware recovers from panics and returns a proper error response
 func PanicRecoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

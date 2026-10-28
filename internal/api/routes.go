@@ -85,6 +85,7 @@ func SetupRoutes(handler *Handler, assetsFS fs.FS) http.Handler {
 	apiHandler = handler.AuthMiddleware(apiHandler)
 	apiHandler = PanicRecoveryMiddleware(apiHandler)
 	apiHandler = LoggingMiddleware(apiHandler)
+	apiHandler = SecurityHeaders(apiHandler)
 
 	return apiHandler
 }

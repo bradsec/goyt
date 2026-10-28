@@ -115,6 +115,22 @@ func TestUnsafeAPIRequestsRejectCrossSiteFetch(t *testing.T) {
 	}
 }
 
+func TestResponsesCarrySecurityHeaders(t *testing.T) {
+	t.Setenv("WEBUI_PASSWORD", "")
+	router := SetupRoutes(newAuthTestHandler(t, ""), fstest.MapFS{})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	for header, want := range map[string]string{
+		"X-Content-Type-Options": "nosniff",
+		"X-Frame-Options":        "DENY",
+		"Referrer-Policy":        "same-origin",
+	} {
+		if got := rec.Header().Get(header); got != want {
+			t.Errorf("%s = %q, want %q", header, got, want)
+		}
+	}
+}
+
 func TestPanicRecoveryMiddleware(t *testing.T) {
 	// Create a handler that panics
 	panicHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

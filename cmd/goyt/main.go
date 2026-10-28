@@ -127,7 +127,7 @@ func main() {
 	addr := net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Port))
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           mainMux,
+		Handler:           api.SecurityHeaders(mainMux),
 		ReadHeaderTimeout: 30 * time.Second,
 	}
 
