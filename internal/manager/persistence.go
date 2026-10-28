@@ -30,6 +30,9 @@ func (dm *DownloadManager) GetStateFilePath() string {
 
 // SaveState persists the current download manager state to disk
 func (dm *DownloadManager) SaveState() error {
+	dm.stateSaveMutex.Lock()
+	defer dm.stateSaveMutex.Unlock()
+
 	stateFile := StateFile{
 		Downloads: make(map[string]*core.Download),
 		SavedAt:   time.Now(),

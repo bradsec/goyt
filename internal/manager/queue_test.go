@@ -505,3 +505,82 @@ func TestAdjustWorkersShrinkBounded(t *testing.T) {
 	dm.UpdateConfig(&grown)
 	waitForWorkers(t, dm, 5, 5)
 }
+
+func TestProcessDownloadSkipsStaleQueueEntry(t *testing.T) {
+	dm := newTestManagerForConvert(t)
+	defer dm.Shutdown()
+
+	download := &core.Download{ID: "paused", Status: core.StatusPaused}
+	dm.mutex.Lock()
+	dm.downloads[download.ID] = download
+	dm.mutex.Unlock()
+
+	if dm.processDownload(download) {
+		t.Fatal("paused download was claimed")
+	}
+	if download.Status != core.StatusPaused {
+		t.Fatalf("status = %s, want paused", download.Status)
+	}
+}
+
+func TestCleanupTemporaryFilesKeepsOtherDownload(t *testing.T) {
+	dir := t.TempDir()
+	dm := NewDownloadManager(core.NewDownloader("yt-dlp", "ffmpeg", "", false, false), 0, dir, &config.Config{})
+	defer dm.Shutdown()
+
+	own := filepath.Join(dir, "foo.mp4.part")
+	stream := filepath.Join(dir, "foo.f137.mp4.part")
+	other := filepath.Join(dir, "foobar.mp4.part")
+	dotted := filepath.Join(dir, "foo.bar.mp4.part")
+	for _, path := range []string{own, stream, other, dotted} {
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	dm.cleanupTemporaryFiles(&core.Download{ID: "foo", Filename: "foo.mp4"})
+	if _, err := os.Stat(own); !os.IsNotExist(err) {
+		t.Fatalf("own temporary file remains: %v", err)
+	}
+	if _, err := os.Stat(stream); !os.IsNotExist(err) {
+		t.Fatalf("own format-stream file remains: %v", err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatalf("other download's temporary file was removed: %v", err)
+	}
+	if _, err := os.Stat(dotted); err != nil {
+		t.Fatalf("dotted title's temporary file was removed: %v", err)
+	}
+}
+
+func TestClearAllQueuedReportsSaveFailure(t *testing.T) {
+	dir := t.TempDir()
+	dm := NewDownloadManager(core.NewDownloader("yt-dlp", "ffmpeg", "", false, false), 0, dir, &config.Config{})
+	defer dm.Shutdown()
+
+	dm.mutex.Lock()
+	dm.outputDir = filepath.Join(dir, "missing")
+	dm.mutex.Unlock()
+	if err := dm.ClearAllQueued(); err == nil {
+		t.Fatal("expected state save error")
+	}
+}
+
+func TestCancelPausedDownload(t *testing.T) {
+	dir := t.TempDir()
+	dm := NewDownloadManager(core.NewDownloader("yt-dlp", "ffmpeg", "", false, false), 0, dir, &config.Config{})
+	defer dm.Shutdown()
+
+	download := &core.Download{ID: "paused", Status: core.StatusPaused}
+	dm.mutex.Lock()
+	dm.downloads[download.ID] = download
+	dm.pausedDownloads[download.ID] = download
+	dm.mutex.Unlock()
+	if err := dm.CancelDownload(download.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := dm.GetDownload(download.ID)
+	if got.Status != core.StatusCanceled {
+		t.Fatalf("status = %s, want canceled", got.Status)
+	}
+}

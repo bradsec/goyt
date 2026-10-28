@@ -45,6 +45,7 @@ type DownloadManager struct {
 	activeConversions int
 	conversionChanged chan struct{}
 	mutex             sync.RWMutex
+	stateSaveMutex    sync.Mutex
 	wg                sync.WaitGroup
 	shutdownOnce      sync.Once
 	shuttingDown      bool
@@ -322,7 +323,6 @@ func (dm *DownloadManager) CancelDownload(id string) error {
 		if cancelFunc, exists := dm.cancelFuncs[id]; exists {
 			log.Printf("[MANAGER] Canceling %s process for download %s", download.Status, id)
 			cancelFunc()
-			delete(dm.cancelFuncs, id)
 		}
 
 		// Clean up temporary files immediately when canceling post-processing
@@ -332,12 +332,13 @@ func (dm *DownloadManager) CancelDownload(id string) error {
 		}
 
 		download.Status = core.StatusCanceled
-	} else if download.Status == core.StatusQueued {
+	} else if download.Status == core.StatusQueued || download.Status == core.StatusPaused {
 		download.Status = core.StatusCanceled
 	}
 
 	// Clean up processing URL on cancelation
 	delete(dm.processingUrls, download.URL)
+	delete(dm.pausedDownloads, id)
 
 	return nil
 }
@@ -355,7 +356,6 @@ func (dm *DownloadManager) PauseDownload(id string) error {
 		// Cancel the actual download process (this will stop yt-dlp)
 		if cancelFunc, exists := dm.cancelFuncs[id]; exists {
 			cancelFunc()
-			delete(dm.cancelFuncs, id)
 		}
 		download.Status = core.StatusPaused
 		dm.pausedDownloads[id] = download
@@ -383,6 +383,9 @@ func (dm *DownloadManager) ResumeDownload(id string) error {
 	if download.Status != core.StatusPaused {
 		return fmt.Errorf("download is not paused")
 	}
+	if _, running := dm.cancelFuncs[id]; running {
+		return fmt.Errorf("download is still stopping")
+	}
 
 	// Reset download state and re-queue (yt-dlp will detect partial files and resume)
 	download.Status = core.StatusQueued
@@ -396,6 +399,9 @@ func (dm *DownloadManager) ResumeDownload(id string) error {
 	// Re-queue the download
 	select {
 	case dm.queue <- download:
+		if dm.progressChannels[id] == nil {
+			dm.progressChannels[id] = make(chan core.DownloadProgress, 10)
+		}
 		log.Printf("[MANAGER] Download %s resumed (will continue from partial file if exists)", id)
 		return nil
 	default:
@@ -417,8 +423,12 @@ func (dm *DownloadManager) RetryDownload(id string) error {
 	if download.Status == core.StatusDownloading || download.Status == core.StatusQueued {
 		return fmt.Errorf("download is already active")
 	}
+	if _, running := dm.cancelFuncs[id]; running {
+		return fmt.Errorf("download is still stopping")
+	}
 
 	// Reset download state
+	previous := *download
 	download.Status = core.StatusQueued
 	download.Error = ""
 	download.Progress = core.DownloadProgress{}
@@ -427,8 +437,12 @@ func (dm *DownloadManager) RetryDownload(id string) error {
 	// Re-queue the download
 	select {
 	case dm.queue <- download:
+		if dm.progressChannels[id] == nil {
+			dm.progressChannels[id] = make(chan core.DownloadProgress, 10)
+		}
 		return nil
 	default:
+		*download = previous
 		return fmt.Errorf("download queue is full")
 	}
 }
@@ -513,36 +527,18 @@ func (dm *DownloadManager) RemoveDownload(id string) error {
 
 // cleanupTemporaryFiles removes temporary files created during post-processing
 func (dm *DownloadManager) cleanupTemporaryFiles(download *core.Download) {
-	if download.Filename == "" && download.Title == "" {
-		log.Printf("[MANAGER] Cleanup: No filename or title available for download %s", download.ID)
-		return
-	}
-
-	// Extract the base filename for searching - prioritize OutputPath if available
-	baseFilename := download.Filename
+	filename := download.Filename
 	if download.OutputPath != "" {
-		// Use the actual output filename as the most accurate base
-		outputFile := filepath.Base(download.OutputPath)
-		if outputFile != "" {
-			baseFilename = outputFile
-		}
+		filename = filepath.Base(download.OutputPath)
 	}
-	if baseFilename == "" && download.Title != "" {
-		// Sanitize title to match potential filename patterns
-		baseFilename = strings.ToLower(strings.ReplaceAll(download.Title, " ", "_"))
-		baseFilename = strings.ReplaceAll(baseFilename, "/", "_")
-		baseFilename = strings.ReplaceAll(baseFilename, "\\", "_")
-	}
-
-	if baseFilename == "" {
-		log.Printf("[MANAGER] Cleanup: No base filename derived for download %s", download.ID)
+	if filename == "" {
+		// Without a known output name there is no safe way to tell this
+		// download's fragments from another's, so leave them in place.
 		return
 	}
-
-	// Remove file extension to get base name
-	if ext := filepath.Ext(baseFilename); ext != "" {
-		baseFilename = strings.TrimSuffix(baseFilename, ext)
-	}
+	// yt-dlp names separate streams "<stem>.f<id>.<ext>.part" before merging.
+	stem := strings.ToLower(strings.TrimSuffix(filename, filepath.Ext(filename)))
+	ownStream := regexp.MustCompile(`^` + regexp.QuoteMeta(stem) + `\.f\d+\.`)
 
 	// Look for temporary files in the output directory
 	outputDir := dm.outputDir
@@ -561,16 +557,16 @@ func (dm *DownloadManager) cleanupTemporaryFiles(download *core.Download) {
 			continue
 		}
 
-		filename := file.Name()
+		candidate := file.Name()
 
-		// Only ever touch files that belong to this download: they must start
-		// with the download's base filename. Never delete unrelated files.
-		if !strings.HasPrefix(strings.ToLower(filename), strings.ToLower(baseFilename)) {
+		// Only match artifacts of the exact output filename or its streams.
+		lower := strings.ToLower(candidate)
+		if !strings.HasPrefix(lower, strings.ToLower(filename)+".") && !ownStream.MatchString(lower) {
 			continue
 		}
 
-		if isTemporaryArtifact(filename) {
-			fullPath := filepath.Join(outputDir, filename)
+		if isTemporaryArtifact(candidate) {
+			fullPath := filepath.Join(outputDir, candidate)
 			if err := os.Remove(fullPath); err != nil {
 				log.Printf("[MANAGER] Failed to delete temp file %s: %v", fullPath, err)
 			} else {
@@ -656,14 +652,12 @@ func (dm *DownloadManager) ClearAllQueued() error {
 	}()
 
 	// Save state immediately to persist the cleared queue (outside of mutex)
-	if err := dm.SaveState(); err != nil {
-		log.Printf("[MANAGER] Warning: Failed to save state after clearing queue: %v", err)
-	}
+	err := dm.SaveState()
 
 	// Start a goroutine to drain any remaining items from the queue
 	go dm.drainQueuedItems()
 
-	return nil
+	return err
 }
 
 // drainQueuedItems helps drain canceled items from the queue more quickly
@@ -679,9 +673,10 @@ func (dm *DownloadManager) drainQueuedItems() {
 			// Check if this download was canceled/deleted
 			dm.mutex.RLock()
 			_, exists := dm.downloads[download.ID]
+			canceled := download.Status == core.StatusCanceled
 			dm.mutex.RUnlock()
 
-			if !exists || download.Status == core.StatusCanceled {
+			if !exists || canceled {
 				// This download was cleared, just discard it
 				drained++
 				log.Printf("[MANAGER] Drained canceled download from queue: %s", download.ID)
@@ -690,9 +685,8 @@ func (dm *DownloadManager) drainQueuedItems() {
 				// This download is still valid, put it back in the queue
 				select {
 				case dm.queue <- download:
-					// Successfully put it back
-				default:
-					// Queue is full, worker will pick it up later
+				case <-dm.ctx.Done():
+					return
 				}
 				// Stop draining since we found a valid item
 				log.Printf("[MANAGER] Queue draining stopped after removing %d canceled items", drained)
@@ -818,31 +812,14 @@ func (dm *DownloadManager) worker() {
 			// Targeted shrink: this worker stops while the others keep running.
 			return
 		case download := <-dm.queue:
-			// Check if the download was canceled or removed while in queue
-			dm.mutex.RLock()
-			currentDownload, exists := dm.downloads[download.ID]
-			dm.mutex.RUnlock()
-
-			if !exists {
-				log.Printf("[MANAGER] Skipping download %s - no longer exists (was cleared)", download.ID)
+			// A paused or retried item can leave an older entry in the queue.
+			// processDownload claims only queued work under the manager lock.
+			if !dm.processDownload(download) {
 				continue
 			}
-
-			if currentDownload.Status == core.StatusCanceled {
-				log.Printf("[MANAGER] Skipping canceled download %s", download.ID)
-				continue
-			}
-			if currentDownload.Status == core.StatusPaused {
-				log.Printf("[MANAGER] Skipping paused download %s", download.ID)
-				continue
-			}
-
-			// Use the current download state, not the queued one
-			log.Printf("[MANAGER] Worker processing download %s", currentDownload.ID)
-			dm.processDownload(currentDownload)
 			// After the download fully settles (cancel funcs and progress
 			// channel cleaned up), optionally re-encode for compatibility.
-			dm.maybeAutoReencode(currentDownload.ID)
+			dm.maybeAutoReencode(download.ID)
 		}
 	}
 }
@@ -925,16 +902,20 @@ func (dm *DownloadManager) adjustWorkers(oldCount, newCount int) {
 	}
 }
 
-func (dm *DownloadManager) processDownload(download *core.Download) {
-	log.Printf("[MANAGER] Processing download %s", download.ID)
-
+func (dm *DownloadManager) processDownload(download *core.Download) bool {
 	dm.mutex.Lock()
-	// Update status to downloading immediately
+	if dm.downloads[download.ID] != download || download.Status != core.StatusQueued {
+		dm.mutex.Unlock()
+		return false
+	}
+	ctx, cancel := context.WithCancel(dm.ctx)
 	download.Status = core.StatusDownloading
+	dm.cancelFuncs[download.ID] = cancel
 	progressChan := dm.progressChannels[download.ID]
 	downloader := dm.downloader
 	outputDir := dm.outputDir
 	dm.mutex.Unlock()
+	log.Printf("[MANAGER] Processing download %s", download.ID)
 
 	req := core.DownloadRequest{
 		URL:       download.URL,
@@ -945,14 +926,6 @@ func (dm *DownloadManager) processDownload(download *core.Download) {
 	}
 
 	log.Printf("[MANAGER] Download %s: Creating context and starting download", download.ID)
-
-	// Create a context for this specific download
-	ctx, cancel := context.WithCancel(dm.ctx)
-
-	// Store cancel function for potential cancelation
-	dm.mutex.Lock()
-	dm.cancelFuncs[download.ID] = cancel
-	dm.mutex.Unlock()
 
 	defer func() {
 		dm.mutex.Lock()
@@ -994,9 +967,11 @@ func (dm *DownloadManager) processDownload(download *core.Download) {
 	}
 
 	dm.mutex.Lock()
-	if ctx.Err() == context.Canceled {
+	if ctx.Err() == context.Canceled && download.Status != core.StatusPaused {
 		log.Printf("[MANAGER] Download %s: Canceled", download.ID)
 		download.Status = core.StatusCanceled
+	} else if ctx.Err() == context.Canceled {
+		log.Printf("[MANAGER] Download %s: Paused", download.ID)
 	} else if err != nil {
 		log.Printf("[MANAGER] Download %s: Failed with error: %v", download.ID, err)
 		download.Status = core.StatusFailed
@@ -1036,6 +1011,7 @@ func (dm *DownloadManager) processDownload(download *core.Download) {
 	}
 	dm.mutex.Unlock()
 	progressWG.Wait()
+	return true
 }
 
 // videoIsCompatible reports whether a download is already H.264 + AAC.
@@ -1057,6 +1033,7 @@ func (dm *DownloadManager) maybeAutoReencode(id string) {
 		(d.Status == core.StatusCompleted || d.Status == core.StatusAlreadyExists) &&
 		!d.Converted
 	var path, vcodec, acodec string
+	downloader := dm.downloader
 	if gate {
 		path, vcodec, acodec = d.OutputPath, d.VideoCodec, d.AudioCodec
 	}
@@ -1068,7 +1045,7 @@ func (dm *DownloadManager) maybeAutoReencode(id string) {
 	// Probe if codecs are unknown (e.g. an already-existing file that the
 	// completion path never probed), so we only convert when truly needed.
 	if vcodec == "" && acodec == "" {
-		if v, a, err := dm.downloader.ProbeCodecs(path); err == nil {
+		if v, a, err := downloader.ProbeCodecs(path); err == nil {
 			vcodec, acodec = v, a
 			dm.mutex.Lock()
 			if cur, ok := dm.downloads[id]; ok {
@@ -1370,8 +1347,12 @@ func (dm *DownloadManager) CheckFileExistence(req core.DownloadRequest) string {
 
 // checkFileExists checks if a file for the given download request already exists
 func (dm *DownloadManager) checkFileExists(req core.DownloadRequest) string {
+	dm.mutex.RLock()
+	downloader := dm.downloader
+	outputDir := dm.outputDir
+	dm.mutex.RUnlock()
 	// Try to get video info to determine potential filename
-	info, err := dm.downloader.GetVideoInfo(req.URL)
+	info, err := downloader.GetVideoInfo(req.URL)
 	if err != nil {
 		// If we can't get video info, we can't check for duplicates effectively
 		return ""
@@ -1390,14 +1371,14 @@ func (dm *DownloadManager) checkFileExists(req core.DownloadRequest) string {
 
 	// Check each potential filename
 	for _, filename := range potentialFilenames {
-		fullPath := filepath.Join(dm.outputDir, filename)
+		fullPath := filepath.Join(outputDir, filename)
 		if _, err := os.Stat(fullPath); err == nil {
 			return fullPath
 		}
 	}
 
 	// Also check for similar files in the directory
-	files, err := os.ReadDir(dm.outputDir)
+	files, err := os.ReadDir(outputDir)
 	if err != nil {
 		return ""
 	}
@@ -1424,7 +1405,7 @@ func (dm *DownloadManager) checkFileExists(req core.DownloadRequest) string {
 			}
 			// If more than 60% of the significant words match, consider it a duplicate
 			if significantWords > 0 && float64(matchCount)/float64(significantWords) > 0.6 {
-				return filepath.Join(dm.outputDir, file.Name())
+				return filepath.Join(outputDir, file.Name())
 			}
 		}
 	}
