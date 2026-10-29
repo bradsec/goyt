@@ -35,6 +35,8 @@ type DownloadManager struct {
 	downloader        *core.Downloader
 	downloads         map[string]*core.Download
 	queue             chan *core.Download
+	backlog           []*core.Download
+	backlogReady      chan struct{}
 	maxConcurrent     int
 	activeWorkers     int             // Track active workers
 	workerCtx         context.Context // Separate context for workers
@@ -72,6 +74,7 @@ func NewDownloadManager(
 		downloader:        downloader,
 		downloads:         make(map[string]*core.Download),
 		queue:             make(chan *core.Download, 100),
+		backlogReady:      make(chan struct{}, 1),
 		maxConcurrent:     maxConcurrent,
 		activeWorkers:     0,
 		workerCtx:         workerCtx,
@@ -87,6 +90,8 @@ func NewDownloadManager(
 		outputDir:         outputDir,
 		config:            cfg,
 	}
+
+	dm.wg.Go(dm.drainBacklog)
 
 	// Start workers
 	dm.startWorkers(maxConcurrent)
@@ -117,33 +122,9 @@ func (dm *DownloadManager) AddDownload(req core.DownloadRequest) (*core.Download
 
 	// Check if this URL is already being processed
 	dm.mutex.Lock()
-	if dm.processingUrls[req.URL] {
+	if err := dm.duplicateError(req); err != nil {
 		dm.mutex.Unlock()
-		return nil, ErrAlreadyProcessing
-	}
-
-	// Check if this URL with the same download settings is already present
-	for _, download := range dm.downloads {
-		if download.URL == req.URL &&
-			download.Type == req.Type &&
-			download.Quality == req.Quality &&
-			download.Format == req.Format &&
-			cmp.Or(download.Audio, "stereo") == cmp.Or(req.Audio, "stereo") &&
-			cmp.Or(download.Range, "sdr") == cmp.Or(req.Range, "sdr") {
-
-			// Provide specific error message based on status
-			switch download.Status {
-			case core.StatusQueued, core.StatusDownloading, core.StatusPostProcessing:
-				dm.mutex.Unlock()
-				return nil, ErrActiveDownload
-			case core.StatusCompleted, core.StatusAlreadyExists:
-				dm.mutex.Unlock()
-				return nil, ErrAlreadyDownloaded
-			case core.StatusFailed:
-				dm.mutex.Unlock()
-				return nil, ErrPreviouslyFailed
-			}
-		}
+		return nil, err
 	}
 
 	// Mark URL as being processed
@@ -207,7 +188,73 @@ func (dm *DownloadManager) AddDownload(req core.DownloadRequest) (*core.Download
 	}
 }
 
-func (dm *DownloadManager) AddPlaylistDownload(req core.DownloadRequest) (*core.Download, error) {
+// duplicateError requires dm.mutex to be held.
+func (dm *DownloadManager) duplicateError(req core.DownloadRequest) error {
+	if dm.processingUrls[req.URL] {
+		return ErrAlreadyProcessing
+	}
+
+	// Check if this URL with the same download settings is already present
+	for _, download := range dm.downloads {
+		if download.URL == req.URL &&
+			download.Type == req.Type &&
+			download.Quality == req.Quality &&
+			download.Format == req.Format &&
+			cmp.Or(download.Audio, "stereo") == cmp.Or(req.Audio, "stereo") &&
+			cmp.Or(download.Range, "sdr") == cmp.Or(req.Range, "sdr") {
+
+			// Provide specific error message based on status
+			switch download.Status {
+			case core.StatusQueued, core.StatusDownloading, core.StatusPostProcessing:
+				return ErrActiveDownload
+			case core.StatusCompleted, core.StatusAlreadyExists:
+				return ErrAlreadyDownloaded
+			case core.StatusFailed:
+				return ErrPreviouslyFailed
+			}
+		}
+	}
+
+	return nil
+}
+
+// drainBacklog is the sole sender for playlist and restored work. Never hold
+// the manager lock while waiting for channel capacity: workers need it to run.
+func (dm *DownloadManager) drainBacklog() {
+	for {
+		dm.mutex.Lock()
+		if len(dm.backlog) == 0 {
+			dm.mutex.Unlock()
+			select {
+			case <-dm.ctx.Done():
+				return
+			case <-dm.backlogReady:
+				continue
+			}
+		}
+		download := dm.backlog[0]
+		dm.mutex.Unlock()
+
+		select {
+		case <-dm.ctx.Done():
+			return
+		case dm.queue <- download:
+		}
+		dm.mutex.Lock()
+		dm.backlog[0] = nil
+		dm.backlog = dm.backlog[1:]
+		dm.mutex.Unlock()
+	}
+}
+
+func (dm *DownloadManager) wakeBacklog() {
+	select {
+	case dm.backlogReady <- struct{}{}:
+	default:
+	}
+}
+
+func (dm *DownloadManager) AddPlaylistDownload(req core.DownloadRequest) (*core.Download, int, error) {
 	log.Printf("[MANAGER] Processing playlist URL: %s", req.URL)
 
 	// Get playlist items
@@ -216,22 +263,32 @@ func (dm *DownloadManager) AddPlaylistDownload(req core.DownloadRequest) (*core.
 	dm.mutex.RUnlock()
 	items, err := downloader.GetPlaylistItems(req.URL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get playlist items: %w", err)
+		return nil, 0, fmt.Errorf("failed to get playlist items: %w", err)
 	}
 
 	if len(items) == 0 {
-		return nil, fmt.Errorf("no items found in playlist")
+		return nil, 0, fmt.Errorf("no items found in playlist")
 	}
 
 	log.Printf("[MANAGER] Found %d items in playlist, creating individual downloads", len(items))
 
 	// Create a download for each playlist item
 	var firstDownload *core.Download
-	for i, item := range items {
+	skipped := 0
+	var duplicateErr error
+	dm.mutex.Lock()
+	for _, item := range items {
 		itemURL := item.URL
 		if itemURL == "" {
 			// flat-playlist entries from YouTube may omit the URL field
 			itemURL = fmt.Sprintf("https://www.youtube.com/watch?v=%s", item.ID)
+		}
+		itemReq := req
+		itemReq.URL = itemURL
+		if err := dm.duplicateError(itemReq); err != nil {
+			skipped++
+			duplicateErr = err
+			continue
 		}
 		download := &core.Download{
 			ID:        core.GenerateID(),
@@ -246,29 +303,20 @@ func (dm *DownloadManager) AddPlaylistDownload(req core.DownloadRequest) (*core.
 			CreatedAt: time.Now(),
 		}
 
-		dm.mutex.Lock()
 		dm.downloads[download.ID] = download
 		dm.progressChannels[download.ID] = make(chan core.DownloadProgress, 10)
-		dm.mutex.Unlock()
-
-		// Add to queue
-		select {
-		case dm.queue <- download:
-			log.Printf("[MANAGER] Playlist item %d/%d added to queue: %s", i+1, len(items), item.Title)
-			if firstDownload == nil {
-				firstDownload = download
-			}
-		default:
-			log.Printf("[MANAGER] Download queue is full, skipping remaining %d playlist items", len(items)-i)
-			dm.mutex.Lock()
-			delete(dm.downloads, download.ID)
-			delete(dm.progressChannels, download.ID)
-			dm.mutex.Unlock()
-			return dm.snapshotOf(firstDownload), nil
+		dm.backlog = append(dm.backlog, download)
+		if firstDownload == nil {
+			firstDownload = download
 		}
 	}
+	dm.mutex.Unlock()
+	dm.wakeBacklog()
+	if firstDownload == nil {
+		return nil, skipped, duplicateErr
+	}
 
-	return dm.snapshotOf(firstDownload), nil
+	return dm.snapshotOf(firstDownload), skipped, nil
 }
 
 // snapshotOf returns a consistent copy of d taken under the lock, or nil for a

@@ -15,7 +15,7 @@ A self-hosted, cross-platform web interface for yt-dlp, written in Go. Download 
 - **Live progress**: Real-time download and ffmpeg processing progress per item
 - **Media quality**: New downloads show selected source quality in a toast and active rows. Completed rows show final video resolution, HDR, audio channels, and bitrate from the downloaded file when available
 - **Queue controls**: Pause, resume, cancel, retry, and bulk clear of queued/completed/failed items
-- **Playlist handling**: Automatic playlist detection with whole-playlist or first-video options
+- **Playlist handling**: Automatic playlist detection with whole-playlist or first-video options. Whole playlists skip duplicates and queue every remaining item; interrupted downloads resume in their original order after a restart.
 - **In-browser playback**: Stream completed video/audio in a built-in player
 - **Duplicate detection**: Skips items already queued or already present on disk, with a clear notice
 - **Cookies support**: Optional Netscape cookies.txt for sites needing login (one file, multiple domains)

@@ -222,7 +222,7 @@ export class DownloadManager {
       // feedback so the UI does not look idle during that background work.
       if (type === 'playlist') {
         this.uiManager.showNotification('Fetching playlist info, this can take a while for large playlists...', 'info');
-        await this.apiClient.startPlaylistDownload(
+        const result = await this.apiClient.startPlaylistDownload(
           downloadData.url,
           downloadData.type,
           downloadData.quality,
@@ -230,7 +230,7 @@ export class DownloadManager {
           downloadData.audio,
           downloadData.range
         );
-        this.uiManager.showNotification('Playlist download started', 'success');
+        this.uiManager.showNotification(`Playlist download started${result.skipped_count ? ` (${result.skipped_count} duplicates skipped)` : ''}`, 'success');
       } else if (type === 'first') {
         this.uiManager.showNotification('Fetching first video...', 'info');
         await this.apiClient.downloadFirstVideo(

@@ -111,7 +111,7 @@ export class ApiClient {
   }
 
   async startPlaylistDownload(url: string, type = 'video', quality = 'best', format = 'mp4', audio = 'stereo', range = 'sdr') {
-    return this.request('/downloads/playlist', {
+    return this.request<{ skipped_count: number }>('/downloads/playlist', {
       method: 'POST',
       body: JSON.stringify({ url, type, quality, format, audio, range }),
       // Server enumerates the playlist; stay above that so the client does not

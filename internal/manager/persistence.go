@@ -1,11 +1,13 @@
 package manager
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"goyt/internal/core"
@@ -101,7 +103,7 @@ func (dm *DownloadManager) LoadState() error {
 	}
 
 	dm.mutex.Lock()
-	defer dm.mutex.Unlock()
+	var queued []*core.Download
 
 	// Restore downloads
 	restoredCount := 0
@@ -116,20 +118,20 @@ func (dm *DownloadManager) LoadState() error {
 				download.Status == core.StatusQueued ||
 				download.Status == core.StatusPostProcessing {
 				download.Status = core.StatusQueued
-				select {
-				case dm.queue <- download:
-					log.Printf("[MANAGER] Re-queued interrupted download: %s", download.Title)
-				default:
-					log.Printf("[MANAGER] Queue full, marking download as failed: %s", download.Title)
-					download.Status = core.StatusFailed
-					download.Error = "Queue full during restoration"
-				}
+				queued = append(queued, download)
 			}
 			restoredCount++
 		} else {
 			log.Printf("[MANAGER] Skipping invalid download during restoration: %s", download.ID)
 		}
 	}
+
+	slices.SortFunc(queued, func(a, b *core.Download) int {
+		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
+	})
+	dm.backlog = append(dm.backlog, queued...)
+	dm.mutex.Unlock()
+	dm.wakeBacklog()
 
 	log.Printf("[MANAGER] State restored: %d downloads loaded (saved at %s)",
 		restoredCount, stateFile.SavedAt.Format("2006-01-02 15:04:05"))

@@ -3,8 +3,11 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,6 +15,189 @@ import (
 	"goyt/internal/config"
 	"goyt/internal/core"
 )
+
+func playlistTestManager(t *testing.T, urls []string) *DownloadManager {
+	t.Helper()
+	dir := t.TempDir()
+	var script strings.Builder
+	script.WriteString("#!/bin/sh\ncat <<'PLAYLIST_JSON'\n")
+	for i, url := range urls {
+		entry, err := json.Marshal(map[string]string{"id": fmt.Sprint(i), "url": url, "title": fmt.Sprint(i)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		script.Write(entry)
+		script.WriteByte('\n')
+	}
+	script.WriteString("PLAYLIST_JSON\n")
+	path := filepath.Join(dir, "yt-dlp")
+	if err := os.WriteFile(path, []byte(script.String()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	dm := NewDownloadManager(core.NewDownloader(path, "ffmpeg", "", false, false), 0, dir, &config.Config{})
+	t.Cleanup(dm.Shutdown)
+	return dm
+}
+
+func receiveQueued(t *testing.T, dm *DownloadManager) *core.Download {
+	t.Helper()
+	select {
+	case download := <-dm.queue:
+		return download
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued download never reached the worker channel")
+		return nil
+	}
+}
+
+func TestPlaylistOverflowKeepsAllItemsInOrder(t *testing.T) {
+	urls := make([]string, 125)
+	for i := range urls {
+		urls[i] = fmt.Sprintf("https://example.com/%03d", i)
+	}
+	dm := playlistTestManager(t, urls)
+	if _, _, err := dm.AddPlaylistDownload(core.DownloadRequest{URL: "https://example.com/playlist"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(dm.GetAllDownloads()); got != len(urls) {
+		t.Fatalf("retained %d downloads, want %d", got, len(urls))
+	}
+	for _, url := range urls {
+		if got := receiveQueued(t, dm); got.URL != url || got.Status != core.StatusQueued {
+			t.Fatalf("got %+v, want queued %s", got, url)
+		}
+	}
+}
+
+func TestPlaylistSkipsDuplicates(t *testing.T) {
+	dm := playlistTestManager(t, []string{"https://example.com/existing", "https://example.com/processing", "https://example.com/new", "https://example.com/new"})
+	dm.mutex.Lock()
+	dm.downloads["existing"] = &core.Download{ID: "existing", URL: "https://example.com/existing", Status: core.StatusCompleted}
+	dm.processingUrls["https://example.com/processing"] = true
+	dm.mutex.Unlock()
+	req := core.DownloadRequest{URL: "https://example.com/playlist", Audio: "stereo", Range: "sdr"}
+	first, skipped, err := dm.AddPlaylistDownload(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skipped != 3 {
+		t.Fatalf("skipped %d, want 3", skipped)
+	}
+	if first == nil || first.URL != "https://example.com/new" || len(dm.GetAllDownloads()) != 2 {
+		t.Fatalf("duplicates retained: first=%+v downloads=%d", first, len(dm.GetAllDownloads()))
+	}
+	if _, skipped, err := dm.AddPlaylistDownload(req); !errors.Is(err, ErrActiveDownload) || skipped != 4 {
+		t.Fatalf("all-duplicate playlist: skipped=%d err=%v", skipped, err)
+	}
+}
+
+func TestBackloggedDownloadControls(t *testing.T) {
+	dm := playlistTestManager(t, []string{"https://example.com/pause", "https://example.com/cancel", "https://example.com/remove"})
+	for range cap(dm.queue) {
+		dm.queue <- &core.Download{}
+	}
+	if _, _, err := dm.AddPlaylistDownload(core.DownloadRequest{URL: "https://example.com/playlist"}); err != nil {
+		t.Fatal(err)
+	}
+	items := dm.GetAllDownloads()
+	if err := dm.PauseDownload(items[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := dm.CancelDownload(items[1].ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := dm.RemoveDownload(items[2].ID); err != nil {
+		t.Fatal(err)
+	}
+	for range cap(dm.queue) {
+		receiveQueued(t, dm)
+	}
+	for range 3 {
+		if download := receiveQueued(t, dm); dm.processDownload(download) {
+			t.Fatalf("claimed stale backlog entry %s", download.ID)
+		}
+	}
+	if got, _ := dm.GetDownload(items[0].ID); got.Status != core.StatusPaused {
+		t.Fatalf("paused item became %s", got.Status)
+	}
+	if got, _ := dm.GetDownload(items[1].ID); got.Status != core.StatusCanceled {
+		t.Fatalf("canceled item became %s", got.Status)
+	}
+	if _, exists := dm.GetDownload(items[2].ID); exists {
+		t.Fatal("removed item remains")
+	}
+}
+
+func TestShutdownPersistsBlockedBacklog(t *testing.T) {
+	dm := playlistTestManager(t, []string{"https://example.com/video"})
+	for range cap(dm.queue) {
+		dm.queue <- &core.Download{}
+	}
+	first, _, err := dm.AddPlaylistDownload(core.DownloadRequest{URL: "https://example.com/playlist"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		dm.Shutdown()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("shutdown did not stop blocked backlog drainer")
+	}
+	data, err := os.ReadFile(dm.GetStateFilePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state StateFile
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatal(err)
+	}
+	if saved := state.Downloads[first.ID]; saved == nil || saved.Status != core.StatusQueued {
+		t.Fatalf("backlogged item not persisted as queued: %+v", saved)
+	}
+}
+
+func TestRestoreQueueOrderAndOverflow(t *testing.T) {
+	dir := t.TempDir()
+	state := StateFile{Version: StateVersion, Downloads: make(map[string]*core.Download)}
+	for i := range 125 {
+		id := fmt.Sprintf("%03d", i)
+		status := []core.DownloadStatus{core.StatusQueued, core.StatusDownloading, core.StatusPostProcessing}[i%3]
+		state.Downloads[id] = &core.Download{ID: id, URL: "https://example.com/" + id, Status: status, CreatedAt: time.Unix(int64(i/2), 0)}
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".goyt_state.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dm := NewDownloadManager(core.NewDownloader("yt-dlp", "ffmpeg", "", false, false), 0, dir, &config.Config{})
+	t.Cleanup(dm.Shutdown)
+	for _, download := range dm.GetAllDownloads() {
+		if download.Status != core.StatusQueued {
+			t.Fatalf("restored %s as %s", download.ID, download.Status)
+		}
+	}
+	for i := range 125 {
+		if got := receiveQueued(t, dm).ID; got != fmt.Sprintf("%03d", i) {
+			t.Fatalf("position %d: got %s", i, got)
+		}
+	}
+}
+
+func TestAddDownloadStillRejectsFullQueue(t *testing.T) {
+	dm := playlistTestManager(t, nil)
+	for range cap(dm.queue) {
+		dm.queue <- &core.Download{}
+	}
+	if _, err := dm.AddDownload(core.DownloadRequest{URL: "https://example.com/video"}); !errors.Is(err, ErrQueueFull) {
+		t.Fatalf("got %v, want ErrQueueFull", err)
+	}
+}
 
 func TestUpdateDownloadQuality(t *testing.T) {
 	dm := &DownloadManager{downloads: map[string]*core.Download{"a": {ID: "a", Status: core.StatusDownloading}}}

@@ -5,6 +5,12 @@ versioning (CalVer): `YYYY.MM.DD`.
 
 ## [Unreleased]
 
+### Fixed
+
+- Whole-playlist downloads no longer drop items once the 100-item queue fills; extra items wait and start as space frees up.
+- Whole-playlist downloads skip entries already queued, downloaded, or failed with the same settings, including repeats within the playlist, and report how many were skipped.
+- After a restart, interrupted downloads resume in their original order, and more than 100 no longer get marked failed with "Queue full during restoration".
+
 ## [2026.10.28.5]
 
 ### Fixed

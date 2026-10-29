@@ -430,7 +430,7 @@ func (h *Handler) StartPlaylistDownload(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	download, err := h.downloadManager.AddPlaylistDownload(h.toCoreRequest(req))
+	download, skipped, err := h.downloadManager.AddPlaylistDownload(h.toCoreRequest(req))
 	if err != nil {
 		writeClientError(w, "StartPlaylistDownload", err, "Unable to start the playlist download.")
 		return
@@ -438,6 +438,7 @@ func (h *Handler) StartPlaylistDownload(w http.ResponseWriter, r *http.Request) 
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"message":        "Playlist download started",
+		"skipped_count":  skipped,
 		"first_download": download,
 	})
 }
