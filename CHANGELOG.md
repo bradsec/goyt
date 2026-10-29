@@ -5,6 +5,8 @@ versioning (CalVer): `YYYY.MM.DD`.
 
 ## [Unreleased]
 
+## [2026.10.30]
+
 ### Fixed
 
 - Whole-playlist downloads no longer drop items once the 100-item queue fills; extra items wait and start as space frees up.
