@@ -5,6 +5,8 @@ versioning (CalVer): `YYYY.MM.DD`.
 
 ## [Unreleased]
 
+## [2026.10.30.1]
+
 ### Fixed
 
 - Downloads retain their own output file when titles start with http or metadata lookup fails, and dotted title suffixes no longer collapse into one filename.
