@@ -403,14 +403,14 @@ func TestFindDownloadedFile(t *testing.T) {
 	downloader := NewDownloader("", "", "", false, false)
 
 	// Test finding existing file
-	result := downloader.findDownloadedFile(tempDir, "test video", "mp4")
+	result := downloader.findDownloadedFile(tempDir, "test video.mp4")
 	expected := filepath.Join(tempDir, "test video.mp4")
 	if result != expected {
 		t.Errorf("Expected to find %s, got %s", expected, result)
 	}
 
 	// Test finding non-existent file
-	result = downloader.findDownloadedFile(tempDir, "nonexistent", "avi")
+	result = downloader.findDownloadedFile(tempDir, "test.mp4")
 	if result != "" {
 		t.Errorf("Expected empty result for non-existent file, got %s", result)
 	}
@@ -560,5 +560,107 @@ func TestAudioOnlyChannelSelection(t *testing.T) {
 	}
 	if ff := d.buildAudioFFmpegArgs("m4a", "p", true); !strings.Contains(ff, "-b:a 384k") {
 		t.Errorf("surround m4a args %q, want 384k AAC", ff)
+	}
+}
+
+func outputFixtureDownloader(t *testing.T, dir string) *Downloader {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a shell script as a fake yt-dlp")
+	}
+	path := filepath.Join(dir, "yt-dlp")
+	script := `#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = --dump-json ]; then
+    [ "$GOYT_TEST_TITLE" = metadata-failure ] && exit 1
+    printf '{"title":"%s"}\n' "$GOYT_TEST_TITLE"
+    exit 0
+  fi
+done
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = --output ]; then
+    shift
+    printf 'fixture media\n' > "$1"
+    exit 0
+  fi
+  shift
+done
+exit 2
+`
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return NewDownloader(path, "ffmpeg", "", false, false)
+}
+
+func TestDownloadDottedTitlesHaveDistinctOutputs(t *testing.T) {
+	dir := t.TempDir()
+	d := outputFixtureDownloader(t, dir)
+	var paths []string
+	for _, title := range []string{"Lecture.1", "Lecture.2", "Lecture.mp4"} {
+		t.Setenv("GOYT_TEST_TITLE", title)
+		dl, err := d.Download(t.Context(), DownloadRequest{
+			URL: "https://example.com/" + title, Type: VideoDownload,
+			Quality: "best", Format: FormatMP4, OutputDir: dir,
+		}, make(chan DownloadProgress, 100), nil, nil, nil, title)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := SanitizeFilename(title) + ".mp4"
+		if filepath.Base(dl.OutputPath) != want {
+			t.Errorf("title %q: output = %q, want %q", title, dl.OutputPath, want)
+		}
+		paths = append(paths, filepath.Base(dl.OutputPath))
+	}
+	if paths[0] == paths[1] {
+		t.Fatalf("distinct titles Lecture.1 and Lecture.2 share output %q", paths[0])
+	}
+}
+
+func TestDownloadKeepsOwnOutput(t *testing.T) {
+	for _, tc := range []struct {
+		name, title, format string
+		mediaType           DownloadType
+	}{
+		{"http title video", "http tutorial", FormatMP4, VideoDownload},
+		{"http title audio", "http tutorial", "mp3", AudioDownload},
+		{"fallback video", "metadata-failure", FormatMP4, VideoDownload},
+		{"fallback audio", "metadata-failure", "mp3", AudioDownload},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			d := outputFixtureDownloader(t, dir)
+			t.Setenv("GOYT_TEST_TITLE", tc.title)
+			unrelated := filepath.Join(dir, "unrelated."+tc.format)
+			if err := os.WriteFile(unrelated, []byte("other download"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			future := time.Now().Add(time.Hour)
+			if err := os.Chtimes(unrelated, future, future); err != nil {
+				t.Fatal(err)
+			}
+
+			dl, err := d.Download(t.Context(), DownloadRequest{
+				URL: "https://example.com/tutorial", Type: tc.mediaType,
+				Quality: "best", Format: tc.format, OutputDir: dir,
+			}, make(chan DownloadProgress, 100), nil, nil, nil, "own-output")
+			if err != nil {
+				t.Fatal(err)
+			}
+			base := SanitizeFilename(tc.title)
+			if tc.title == "metadata-failure" {
+				base = "download_own-output"
+			}
+			want := filepath.Join(dir, base+"."+tc.format)
+			if _, err := os.Stat(want); err != nil {
+				t.Fatalf("fixture did not create own output: %v", err)
+			}
+			if dl.OutputPath != want || dl.Filename != filepath.Base(want) {
+				t.Fatalf("download owns %q but reports %q, filename %q", want, dl.OutputPath, dl.Filename)
+			}
+			if dl.FileSize != int64(len("fixture media\n")) {
+				t.Errorf("file size = %d, want own output size", dl.FileSize)
+			}
+		})
 	}
 }

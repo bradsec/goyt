@@ -279,12 +279,8 @@ func (d *Downloader) Download(
 		}
 	}()
 
-	expectedExt := "." + req.Format
-
-	// Ensure filename has correct extension
-	if !strings.HasSuffix(download.Filename, expectedExt) {
-		download.Filename = strings.TrimSuffix(download.Filename, filepath.Ext(download.Filename)) + expectedExt
-	}
+	// The sanitized title is a basename, including any dotted suffix.
+	download.Filename += "." + req.Format
 
 	download.OutputPath = filepath.Join(req.OutputDir, download.Filename)
 	if utils.VerboseLogging {
@@ -413,24 +409,8 @@ func (d *Downloader) Download(
 
 	log.Printf("[DOWNLOAD] %s: yt-dlp process completed", download.ID)
 
-	// Find the actual downloaded file
-	actualFilePath := d.findDownloadedFile(req.OutputDir, download.Title, req.Format)
-	if actualFilePath != "" {
-		download.OutputPath = actualFilePath
-		download.Filename = filepath.Base(actualFilePath)
-
-		// Extract actual title from filename if we used fallback URL
-		if download.Title == req.URL {
-			actualTitle := d.extractTitleFromFilename(download.Filename)
-			if actualTitle != "" {
-				download.Title = actualTitle
-				// Update title in manager if callback is provided
-				if titleCallback != nil {
-					titleCallback(download.ID, actualTitle)
-				}
-			}
-		}
-	} else {
+	// Verify only the output assigned to this download, never another directory entry.
+	if d.findDownloadedFile(req.OutputDir, download.Filename) == "" {
 		log.Printf("[DOWNLOAD] %s: Warning - could not locate downloaded file in %s", download.ID, req.OutputDir)
 	}
 
@@ -448,96 +428,13 @@ func (d *Downloader) Download(
 	return download, nil
 }
 
-// findDownloadedFile looks for the actual downloaded file based on title and format
-func (d *Downloader) findDownloadedFile(outputDir, title, format string) string {
-	// If title is a URL, we need to search for any file with the correct format
-	if strings.HasPrefix(title, "http") {
-		return d.findMostRecentFile(outputDir, format)
+// findDownloadedFile checks the exact output filename assigned to a download.
+func (d *Downloader) findDownloadedFile(outputDir, filename string) string {
+	path := filepath.Join(outputDir, filename)
+	if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+		return path
 	}
-
-	// Sanitize title for filename matching
-	sanitizedTitle := SanitizeFilename(title)
-
-	// List of possible filenames to check
-	possibleFiles := []string{
-		sanitizedTitle + "." + format,
-		title + "." + format,
-		// yt-dlp might create different variations
-	}
-
-	// Check each possible filename
-	for _, filename := range possibleFiles {
-		fullPath := filepath.Join(outputDir, filename)
-		if _, err := os.Stat(fullPath); err == nil {
-			return fullPath
-		}
-	}
-
-	// If exact match not found, look for files with similar names
-	files, err := os.ReadDir(outputDir)
-	if err != nil {
-		return ""
-	}
-
-	for _, file := range files {
-		if file.IsDir() {
-			continue
-		}
-
-		// Check if filename contains sanitized title and has correct extension
-		filename := file.Name()
-		if strings.Contains(strings.ToLower(filename), strings.ToLower(sanitizedTitle)) &&
-			strings.HasSuffix(strings.ToLower(filename), "."+format) {
-			return filepath.Join(outputDir, filename)
-		}
-	}
-
 	return ""
-}
-
-// findMostRecentFile finds the most recently created file with the given format
-func (d *Downloader) findMostRecentFile(outputDir, format string) string {
-	files, err := os.ReadDir(outputDir)
-	if err != nil {
-		return ""
-	}
-
-	var mostRecent os.FileInfo
-	var mostRecentPath string
-
-	for _, file := range files {
-		if file.IsDir() {
-			continue
-		}
-
-		filename := file.Name()
-		if strings.HasSuffix(strings.ToLower(filename), "."+format) {
-			fullPath := filepath.Join(outputDir, filename)
-			fileInfo, err := os.Stat(fullPath)
-			if err != nil {
-				continue
-			}
-
-			if mostRecent == nil || fileInfo.ModTime().After(mostRecent.ModTime()) {
-				mostRecent = fileInfo
-				mostRecentPath = fullPath
-			}
-		}
-	}
-
-	return mostRecentPath
-}
-
-// extractTitleFromFilename extracts the title from a filename by removing the extension
-func (d *Downloader) extractTitleFromFilename(filename string) string {
-	// Remove extension
-	title := strings.TrimSuffix(filename, filepath.Ext(filename))
-
-	// Basic cleanup - remove common yt-dlp artifacts
-	title = strings.ReplaceAll(title, "_", " ")
-	title = strings.TrimSpace(title)
-
-	return title
 }
 
 func (d *Downloader) buildYtDlpArgs(req DownloadRequest, download *Download) []string {
@@ -605,15 +502,7 @@ func (d *Downloader) buildYtDlpArgs(req DownloadRequest, download *Download) []s
 			args = append(args, "--postprocessor-args", "ffmpeg:"+audioFFmpegArgs)
 		}
 
-		// Use yt-dlp's default filename template if we don't have a title.
-		// --restrict-filenames keeps that fallback ASCII-safe so emojis and
-		// non-Latin scripts do not leak onto disk as mojibake.
-		if download.Title == req.URL {
-			args = append(args, "--restrict-filenames")
-			args = append(args, "--output", "%(title)s.%(ext)s")
-		} else {
-			args = append(args, "--output", download.Filename)
-		}
+		args = append(args, "--output", download.Filename)
 	} else {
 		// Video download - use natural format selection
 		args = append(args, d.selectionArgs(req)...)
@@ -631,15 +520,7 @@ func (d *Downloader) buildYtDlpArgs(req DownloadRequest, download *Download) []s
 		args = append(args, "--merge-output-format", container)
 		args = append(args, "--remux-video", container)
 
-		// Use yt-dlp's default filename template if we don't have a title.
-		// --restrict-filenames keeps that fallback ASCII-safe so emojis and
-		// non-Latin scripts do not leak onto disk as mojibake.
-		if download.Title == req.URL {
-			args = append(args, "--restrict-filenames")
-			args = append(args, "--output", "%(title)s.%(ext)s")
-		} else {
-			args = append(args, "--output", download.Filename)
-		}
+		args = append(args, "--output", download.Filename)
 	}
 
 	// Add URL
