@@ -8,6 +8,7 @@ versioning (CalVer): `YYYY.MM.DD`.
 ### Fixed
 
 - Downloads retain their own output file when titles start with http or metadata lookup fails, and dotted title suffixes no longer collapse into one filename.
+- Interrupted conversions restore the original file after restart so it can be played, downloaded, or converted again.
 
 ## [2026.10.30]
 

@@ -189,6 +189,91 @@ func TestRestoreQueueOrderAndOverflow(t *testing.T) {
 	}
 }
 
+func TestRestoreInterruptedConversion(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		file    string
+		status  core.DownloadStatus
+		missing bool
+	}{
+		{name: "webm", file: "original.webm", status: core.StatusCompleted},
+		{name: "mp4", file: "original.mp4", status: core.StatusCompleted},
+		{name: "already_exists", file: "original.webm", status: core.StatusAlreadyExists},
+		{name: "missing_original", file: "original.webm", status: core.StatusCompleted, missing: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, tt.file)
+			if !tt.missing {
+				if err := os.WriteFile(path, []byte("intact original"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			d := core.NewDownloader("missing-yt-dlp", "missing-ffmpeg", "", false, false)
+			dm := NewDownloadManager(d, 0, dir, &config.Config{})
+			t.Cleanup(dm.Shutdown)
+			dm.mutex.Lock()
+			dm.downloads["converting"] = &core.Download{
+				ID: "converting", URL: "https://example.com/video", Type: core.VideoDownload,
+				Status: tt.status, OutputPath: path, Filename: tt.file,
+				VideoCodec: "vp9", AudioCodec: "opus",
+			}
+			dm.mutex.Unlock()
+			// Zero worker slots hold the conversion before invoking an external tool.
+			if err := dm.ConvertDownload("converting"); err != nil {
+				t.Fatal(err)
+			}
+			dm.mutex.Lock()
+			dm.downloads["converting"].Progress = core.DownloadProgress{Phase: "converting", Percentage: 42}
+			dm.mutex.Unlock()
+			// SaveState models the periodic snapshot during a long conversion.
+			if err := dm.SaveState(); err != nil {
+				t.Fatal(err)
+			}
+			checkpoint, err := os.ReadFile(dm.GetStateFilePath())
+			if err != nil {
+				t.Fatal(err)
+			}
+			dm.Shutdown()
+			// Restore the crash checkpoint rather than the graceful shutdown snapshot.
+			if err := os.WriteFile(dm.GetStateFilePath(), checkpoint, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			restored := NewDownloadManager(d, 0, dir, &config.Config{})
+			t.Cleanup(restored.Shutdown)
+			dl, ok := restored.GetDownload("converting")
+			if !ok {
+				t.Fatal("original record disappeared")
+			}
+			wantStatus := core.StatusCompleted
+			if tt.missing {
+				wantStatus = core.StatusFailed
+			}
+			if dl.Status != wantStatus {
+				t.Fatalf("restored status=%s, want %s", dl.Status, wantStatus)
+			}
+			if dl.Progress != (core.DownloadProgress{}) {
+				t.Errorf("stale conversion progress: %+v", dl.Progress)
+			}
+			if dl.OutputPath != path || dl.Filename != tt.file || dl.Converted || dl.VideoCodec != "vp9" || dl.AudioCodec != "opus" {
+				t.Errorf("original metadata changed: %+v", dl)
+			}
+			if tt.missing {
+				if dl.Error != "Output file not found after restart" {
+					t.Errorf("missing original error=%q", dl.Error)
+				}
+				return
+			}
+			if data, err := os.ReadFile(path); err != nil || string(data) != "intact original" {
+				t.Fatalf("original changed: data=%q err=%v", data, err)
+			}
+			if err := restored.ConvertDownload(dl.ID); err != nil {
+				t.Fatalf("retry conversion: %v", err)
+			}
+		})
+	}
+}
+
 func TestAddDownloadStillRejectsFullQueue(t *testing.T) {
 	dm := playlistTestManager(t, nil)
 	for range cap(dm.queue) {

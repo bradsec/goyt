@@ -150,6 +150,12 @@ func (dm *DownloadManager) validateRestoredDownload(download *core.Download) boo
 		return false
 	}
 
+	// Conversion jobs do not survive restart; the saved path still names the original.
+	if download.Status == core.StatusConverting {
+		download.Status = core.StatusCompleted
+		download.Progress = core.DownloadProgress{}
+	}
+
 	// For completed downloads, verify the file still exists
 	if download.Status == core.StatusCompleted && download.OutputPath != "" {
 		if _, err := os.Stat(download.OutputPath); os.IsNotExist(err) {
